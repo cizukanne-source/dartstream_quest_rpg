@@ -5,7 +5,8 @@ as the backend for a small game-like app.
 
 It follows the same integration pattern as the reference apps:
 
-- Firebase email/password auth for the user-facing sign-up / sign-in step
+- `dartstream_client` for Firebase email/password auth and DartStream session
+  onboarding
 - DartStream bootstrap using the Firebase `idToken`
 - live reads from profile, feature flags, inventory, and cloud-save services
 - writes back to cloud save and the reactive event log
@@ -40,7 +41,7 @@ hosts baked into `lib/config.dart`.
 ## Project structure
 
 - `lib/config.dart` - backend host configuration and Firebase API key lookup
-- `lib/api/firebase_auth.dart` - Firebase Identity Toolkit REST client
+- `lib/api/firebase_auth.dart` - `dartstream_client` auth bridge
 - `lib/api/dartstream.dart` - typed DartStream backend client
 - `lib/state/session.dart` - authentication and tenant state
 - `lib/screens/login_screen.dart` - create-account / sign-in UI
