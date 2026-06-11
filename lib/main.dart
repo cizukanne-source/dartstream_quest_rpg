@@ -1,4 +1,3 @@
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter/material.dart';
 
 import 'screens/home_screen.dart';
@@ -7,11 +6,6 @@ import 'state/session.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  try {
-    await dotenv.load(fileName: '.env');
-  } catch (_) {
-    // The app still works with --dart-define if the local .env file is absent.
-  }
   runApp(const DartStreamQuestApp());
 }
 

@@ -1,5 +1,3 @@
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-
 /// Hosts and Firebase config for the live DartStream sample environment.
 ///
 /// The sample uses the same auth pattern as the reference apps:
@@ -11,14 +9,6 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 ///     --dart-define=FIREBASE_API_KEY=YOUR_FIREBASE_WEB_KEY
 class AppConfig {
   static String get firebaseApiKey {
-    try {
-      final fromEnvFile = dotenv.env['FIREBASE_API_KEY'] ?? '';
-      if (fromEnvFile.isNotEmpty) {
-        return fromEnvFile;
-      }
-    } catch (_) {
-      // Widget tests and cold starts can reach here before dotenv loads.
-    }
     return const String.fromEnvironment('FIREBASE_API_KEY');
   }
 

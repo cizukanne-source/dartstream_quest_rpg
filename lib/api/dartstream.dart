@@ -27,9 +27,13 @@ class DartstreamApiException implements Exception {
 }
 
 class DartstreamApi {
-  DartstreamApi({required this.idToken});
+  DartstreamApi({
+    required this.idToken,
+    http.Client? client,
+  }) : _client = client ?? http.Client();
 
   final String idToken;
+  final http.Client _client;
 
   Map<String, String> _headers({
     String? tenantId,
@@ -52,7 +56,7 @@ class DartstreamApi {
     String? email,
     String? displayName,
   }) async {
-    final response = await http.post(
+    final response = await _client.post(
       Uri.parse('${AppConfig.authHost}/api/v1/auth/signup'),
       headers: _headers(json: true),
       body: jsonEncode({
@@ -64,7 +68,7 @@ class DartstreamApi {
     );
 
     if (response.statusCode == 409) {
-      final login = await http.post(
+      final login = await _client.post(
         Uri.parse('${AppConfig.authHost}/api/v1/auth/login'),
         headers: _headers(json: true),
         body: jsonEncode({
@@ -81,7 +85,7 @@ class DartstreamApi {
   }
 
   Future<Map<String, dynamic>> me() async {
-    final response = await http.get(
+    final response = await _client.get(
       Uri.parse('${AppConfig.authHost}/api/v1/auth/me'),
       headers: _headers(),
     );
@@ -94,7 +98,7 @@ class DartstreamApi {
     String? projectId,
     String? environmentId,
   }) async {
-    final response = await http.get(
+    final response = await _client.get(
       Uri.parse(
         '${AppConfig.experienceHost}/api/v1/experience/profiles/me'
         '?userId=${Uri.encodeQueryComponent(userId)}'
@@ -109,7 +113,7 @@ class DartstreamApi {
   Future<Map<String, dynamic>> featureFlags({
     required String tenantId,
   }) async {
-    final response = await http.get(
+    final response = await _client.get(
       Uri.parse('${AppConfig.platformHost}/api/v1/platform/feature-flags'),
       headers: _headers(tenantId: tenantId),
     );
@@ -122,7 +126,7 @@ class DartstreamApi {
     String? projectId,
     String? environmentId,
   }) async {
-    final response = await http.get(
+    final response = await _client.get(
       Uri.parse(
         '${AppConfig.experienceHost}/api/v1/experience/inventory/items'
         '?userId=${Uri.encodeQueryComponent(userId)}'
@@ -141,7 +145,7 @@ class DartstreamApi {
     String? projectId,
     String? environmentId,
   }) async {
-    final response = await http.get(
+    final response = await _client.get(
       Uri.parse(
         '${AppConfig.experienceHost}/api/v1/experience/cloud-save/snapshot'
         '?userId=${Uri.encodeQueryComponent(userId)}'
@@ -165,7 +169,7 @@ class DartstreamApi {
     String? projectId,
     String? environmentId,
   }) async {
-    final response = await http.post(
+    final response = await _client.post(
       Uri.parse(
         '${AppConfig.experienceHost}/api/v1/experience/cloud-save/snapshot'
         '?userId=${Uri.encodeQueryComponent(userId)}'
@@ -174,7 +178,7 @@ class DartstreamApi {
         '${_scope(projectId, environmentId)}',
       ),
       headers: _headers(tenantId: tenantId, json: true),
-      body: jsonEncode(payload),
+      body: jsonEncode({'payload': payload}),
     );
     if (response.statusCode != 200 &&
         response.statusCode != 201 &&
@@ -188,14 +192,12 @@ class DartstreamApi {
     required String eventType,
     required Map<String, dynamic> payload,
   }) async {
-    final response = await http.post(
+    final response = await _client.post(
       Uri.parse('${AppConfig.reactiveHost}/api/v1/reactive/events/log'),
       headers: _headers(tenantId: tenantId, json: true),
       body: jsonEncode({
-        'eventType': eventType,
+        'event_type': eventType,
         'payload': payload,
-        'source': 'dartstream_quest_rpg',
-        'timestamp': DateTime.now().toUtc().toIso8601String(),
       }),
     );
     return _jsonOrThrow(response);
@@ -204,7 +206,7 @@ class DartstreamApi {
   Future<List<dynamic>> streamingChannels({
     required String tenantId,
   }) async {
-    final response = await http.get(
+    final response = await _client.get(
       Uri.parse('${AppConfig.reactiveHost}/api/v1/reactive/streaming/channels'),
       headers: _headers(tenantId: tenantId),
     );
