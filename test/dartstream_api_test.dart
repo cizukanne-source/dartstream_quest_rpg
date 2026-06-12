@@ -1,73 +1,94 @@
 import 'dart:convert';
 
-import 'package:dartstream_quest_rpg/api/dartstream.dart';
+import 'package:dartstream_client/dartstream_client.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
+DartStreamClient _client(MockClient mockClient) {
+  return DartStreamClient(
+    config: DartStreamConfig.local(firebaseApiKey: 'test-key'),
+    httpClient: mockClient,
+  );
+}
+
+DartStreamSession _session() {
+  return const DartStreamSession(
+    idToken: 'firebase-id-token',
+    userId: 'user-123',
+    tenantId: 'tenant-456',
+    raw: <String, dynamic>{},
+  );
+}
+
 void main() {
-  test('saveSnapshot wraps payload in the payload envelope', () async {
-    late http.Request capturedRequest;
-    final client = MockClient((request) async {
-      capturedRequest = request;
-      return http.Response('', 204);
+  test('saveCloudSave wraps payload in the expected envelope', () async {
+    late Uri requestUri;
+    late Map<String, String> requestHeaders;
+    late Map<String, dynamic> requestBody;
+
+    final client = _client(
+      MockClient((request) async {
+        requestUri = request.url;
+        requestHeaders = request.headers;
+        requestBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response('{}', 200);
+      }),
+    );
+
+    await client.experience.saveCloudSave(
+      _session(),
+      slotKey: 'quest',
+      payload: const {'xp': 42, 'gold': 7},
+    );
+
+    expect(requestUri.path, '/api/v1/experience/cloud-save/snapshot');
+    expect(requestUri.queryParameters['slotKey'], 'quest');
+    expect(requestUri.queryParameters['projectId'], 'default-app');
+    expect(requestUri.queryParameters['environmentId'], 'development');
+    expect(requestHeaders['authorization'], 'Bearer firebase-id-token');
+    expect(requestHeaders['x-tenant-id'], 'tenant-456');
+    expect(requestBody, {
+      'payload': {'xp': 42, 'gold': 7},
     });
-
-    final api = DartstreamApi(idToken: 'token-123', client: client);
-    await api.saveSnapshot(
-      userId: 'user-1',
-      tenantId: 'tenant-1',
-      payload: const {'xp': 120, 'gold': 45},
-    );
-
-    expect(capturedRequest.headers['authorization'], 'Bearer token-123');
-    expect(capturedRequest.headers['x-tenant-id'], 'tenant-1');
-    expect(
-      jsonDecode(capturedRequest.body),
-      <String, dynamic>{
-        'payload': <String, dynamic>{
-          'xp': 120,
-          'gold': 45,
-        },
-      },
-    );
   });
 
-  test('logEvent sends event_type in snake case', () async {
-    late http.Request capturedRequest;
-    final client = MockClient((request) async {
-      capturedRequest = request;
-      return http.Response('{"ok":true}', 200);
-    });
+  test('trackEvent uses snake_case event_type', () async {
+    late Uri requestUri;
+    late Map<String, dynamic> requestBody;
 
-    final api = DartstreamApi(idToken: 'token-123', client: client);
-    await api.logEvent(
-      tenantId: 'tenant-1',
+    final client = _client(
+      MockClient((request) async {
+        requestUri = request.url;
+        requestBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response('{}', 200);
+      }),
+    );
+
+    await client.reactive.trackEvent(
+      _session(),
       eventType: 'quest.action.explore',
-      payload: const {'xp': 12},
+      payload: const {'step': 'explore'},
     );
 
-    expect(capturedRequest.headers['authorization'], 'Bearer token-123');
-    expect(capturedRequest.headers['x-tenant-id'], 'tenant-1');
-    expect(
-      jsonDecode(capturedRequest.body),
-      <String, dynamic>{
-        'event_type': 'quest.action.explore',
-        'payload': <String, dynamic>{'xp': 12},
-      },
-    );
+    expect(requestUri.path, '/api/v1/reactive/events/log');
+    expect(requestBody, {
+      'event_type': 'quest.action.explore',
+      'payload': {'step': 'explore'},
+    });
   });
 
-  test('loadSnapshot returns null for a missing snapshot', () async {
-    final client = MockClient((request) async {
-      expect(request.url.path, '/api/v1/experience/cloud-save/snapshot');
-      return http.Response('', 404);
-    });
+  test('loadCloudSave returns null for missing snapshots', () async {
+    final client = _client(
+      MockClient((request) async {
+        expect(request.url.path, '/api/v1/experience/cloud-save/snapshot');
+        return http.Response('', 404);
+      }),
+    );
 
-    final api = DartstreamApi(idToken: 'token-123', client: client);
-    final snapshot = await api.loadSnapshot(
-      userId: 'user-1',
-      tenantId: 'tenant-1',
+    final snapshot = await client.experience.loadCloudSave(
+      _session(),
+      slotKey: 'quest',
     );
 
     expect(snapshot, isNull);

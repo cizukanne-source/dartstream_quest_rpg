@@ -3,11 +3,9 @@
 DartStream Quest RPG is a standalone Flutter sample that uses DartStream SaaS
 as the backend for a small game-like app.
 
-It follows the same integration pattern as the reference apps:
+It uses `dartstream_client` end-to-end:
 
-- `dartstream_client` for Firebase email/password auth and DartStream session
-  onboarding
-- DartStream bootstrap using the Firebase `idToken`
+- Firebase email/password auth and DartStream session onboarding
 - live reads from profile, feature flags, inventory, and cloud-save services
 - writes back to cloud save and the reactive event log
 
@@ -41,8 +39,6 @@ hosts baked into `lib/config.dart`.
 ## Project structure
 
 - `lib/config.dart` - backend host configuration and Firebase API key lookup
-- `lib/api/firebase_auth.dart` - `dartstream_client` auth bridge
-- `lib/api/dartstream.dart` - typed DartStream backend client
 - `lib/state/session.dart` - authentication and tenant state
 - `lib/screens/login_screen.dart` - create-account / sign-in UI
 - `lib/screens/home_screen.dart` - live RPG dashboard and backend panels

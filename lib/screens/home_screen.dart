@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:dartstream_client/dartstream_client.dart';
 import 'package:flutter/material.dart';
 
-import '../api/dartstream.dart';
 import '../state/session.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -30,9 +30,8 @@ class _HomeScreenState extends State<HomeScreen>
 
   late _GameState _state;
 
-  DartstreamApi get _api => widget.session.api!;
-  String get _userId => widget.session.userId!;
-  String get _tenantId => widget.session.tenantId!;
+  DartStreamClient get _client => widget.session.client!;
+  DartStreamSession get _sdkSession => widget.session.sdkSession!;
   String get _displayName =>
       widget.session.displayName ??
       widget.session.email?.split('@').first ??
@@ -63,15 +62,15 @@ class _HomeScreenState extends State<HomeScreen>
 
     try {
       final results = await Future.wait([
-        _api.profile(userId: _userId, tenantId: _tenantId),
-        _api.featureFlags(tenantId: _tenantId),
-        _api.inventory(userId: _userId, tenantId: _tenantId),
-        _api.loadSnapshot(userId: _userId, tenantId: _tenantId, slotKey: _slotKey),
+        _client.experience.profile(_sdkSession),
+        _client.platform.featureFlags(_sdkSession),
+        _client.experience.inventory(_sdkSession),
+        _client.experience.loadCloudSave(_sdkSession, slotKey: _slotKey),
       ]);
 
       final profile = results[0] as Map<String, dynamic>;
-      final flags = results[1] as Map<String, dynamic>;
-      final inventory = results[2] as Map<String, dynamic>;
+      final flags = results[1];
+      final inventory = results[2];
       final snapshot = results[3];
 
       final profileData = _unwrapMap(profile, const ['profile', 'user', 'data']) ?? profile;
@@ -104,9 +103,8 @@ class _HomeScreenState extends State<HomeScreen>
     _saveDebounce?.cancel();
     _saveDebounce = Timer(const Duration(milliseconds: 350), () async {
       try {
-        await _api.saveSnapshot(
-          userId: _userId,
-          tenantId: _tenantId,
+        await _client.experience.saveCloudSave(
+          _sdkSession,
           slotKey: _slotKey,
           payload: _state.toSnapshot(),
         );
@@ -121,8 +119,8 @@ class _HomeScreenState extends State<HomeScreen>
       _state = _state.apply(action, _rng);
     });
     _queueSave();
-    await _api.logEvent(
-      tenantId: _tenantId,
+    await _client.reactive.trackEvent(
+      _sdkSession,
       eventType: 'quest.action.${action.name}',
       payload: _state.toSnapshot(),
     );
@@ -1138,15 +1136,19 @@ Map<String, dynamic>? _unwrapMap(Map<String, dynamic> map, List<String> keys) {
   return null;
 }
 
-List<dynamic> _unwrapList(Map<String, dynamic> map, List<String> keys) {
+List<dynamic> _unwrapList(dynamic value, List<String> keys) {
+  if (value is List) return value;
+  if (value is! Map<String, dynamic>) return const [];
   for (final key in keys) {
-    final value = map[key];
-    if (value is List) return value;
+    final nested = value[key];
+    if (nested is List) return nested;
   }
   return const [];
 }
 
-List<dynamic> _unwrapInventory(Map<String, dynamic> inventory) {
+List<dynamic> _unwrapInventory(dynamic inventory) {
+  if (inventory is List) return inventory;
+  if (inventory is! Map<String, dynamic>) return const [];
   final nested = _unwrapMap(inventory, const ['inventory', 'data']);
   if (nested != null) {
     final items = nested['items'];
