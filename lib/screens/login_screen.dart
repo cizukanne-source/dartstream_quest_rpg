@@ -196,8 +196,8 @@ class _LoginScreenState extends State<LoginScreen> {
             icon: Icons.rocket_launch_rounded,
             title: 'Starts safely',
             body: hasKey
-                ? 'Firebase key detected and ready.'
-                : 'Missing FIREBASE_API_KEY. The realm will ask for a valid key before letting you enter.',
+                ? 'Firebase key loaded and ready.'
+                : 'Firebase key is unavailable, so auth will not start until one is supplied.',
           ),
         ],
       ),
@@ -316,13 +316,6 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ),
           ),
-          if (!hasKey) ...[
-            const SizedBox(height: 12),
-            _ErrorBanner(
-              message:
-                  'FIREBASE_API_KEY is missing. Add it before launch so the portal can open properly.',
-            ),
-          ],
           if (error != null) ...[
             const SizedBox(height: 12),
             _ErrorBanner(message: error),

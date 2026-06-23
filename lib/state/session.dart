@@ -61,12 +61,6 @@ class Session extends ChangeNotifier {
     notifyListeners();
 
     try {
-      if (!AppConfig.hasFirebaseApiKey) {
-        throw StateError(
-          'Missing FIREBASE_API_KEY. Pass it with --dart-define=FIREBASE_API_KEY=...',
-        );
-      }
-
       final config = DartStreamConfig.dev(
         firebaseApiKey: AppConfig.firebaseApiKey,
       );
@@ -96,7 +90,7 @@ class Session extends ChangeNotifier {
       errorMessage = error.message;
     } on DartStreamApiException catch (error) {
       status = SessionStatus.error;
-      errorMessage = error.toString();
+      errorMessage = _friendlyApiError(error);
     } on StateError catch (error) {
       status = SessionStatus.error;
       errorMessage = error.message;
@@ -106,6 +100,19 @@ class Session extends ChangeNotifier {
     }
 
     notifyListeners();
+  }
+
+  String _friendlyApiError(DartStreamApiException error) {
+    final raw = error.toString();
+    final lower = raw.toLowerCase();
+    if (lower.contains('invalid issuer') ||
+        lower.contains('token-verification-failed') ||
+        lower.contains('invalid-token') ||
+        lower.contains('invalid token')) {
+      return 'Firebase token rejected by DartStream: this app is signed in with a Firebase project that the backend does not trust. '
+          'Use the Firebase Web API key for the project configured in DartStream, or update the backend issuer allowlist.';
+    }
+    return raw;
   }
 
   void signOut() {

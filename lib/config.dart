@@ -4,12 +4,17 @@
 /// - Firebase Identity Toolkit for the user-facing sign-up / sign-in step
 /// - DartStream backend bootstrap for tenant-aware session setup
 ///
-/// Pass the Firebase web API key at build time:
-///   flutter run -d chrome --web-port=3000 \
-///     --dart-define=FIREBASE_API_KEY=YOUR_FIREBASE_WEB_KEY
+/// The app ships with the public sample Firebase web key baked in, and a
+/// build-time FIREBASE_API_KEY still overrides it when provided.
 class AppConfig {
+  // This is a public Firebase web API key for the sample project.
+  // A build-time FIREBASE_API_KEY still overrides it when provided.
+  static const _defaultFirebaseApiKey =
+      '';
+
   static String get firebaseApiKey {
-    return const String.fromEnvironment('FIREBASE_API_KEY');
+    final buildTimeKey = const String.fromEnvironment('FIREBASE_API_KEY').trim();
+    return buildTimeKey.isNotEmpty ? buildTimeKey : _defaultFirebaseApiKey;
   }
 
   static bool get hasFirebaseApiKey => firebaseApiKey.isNotEmpty;

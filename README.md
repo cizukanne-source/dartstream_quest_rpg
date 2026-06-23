@@ -9,6 +9,10 @@ It uses `dartstream_client` end-to-end:
 - live reads from profile, feature flags, inventory, and cloud-save services
 - writes back to cloud save and the reactive event log
 
+The app includes a built-in Firebase Web API key for the sample project, so it
+starts without extra `--dart-define` flags. You can still override it at build
+time if needed.
+
 ## What the app does
 
 - creates or signs in a Firebase user
@@ -21,8 +25,19 @@ It uses `dartstream_client` end-to-end:
 
 ```sh
 flutter pub get
-flutter run -d chrome --web-port=3000 \
-  --dart-define=FIREBASE_API_KEY=YOUR_FIREBASE_WEB_KEY
+flutter run -d chrome --web-port=3000
+```
+
+To build the production web bundle:
+
+```sh
+flutter build web --release
+```
+
+To deploy to Firebase Hosting after building:
+
+```sh
+firebase deploy --only hosting
 ```
 
 Optional backend overrides:
@@ -35,6 +50,22 @@ Optional backend overrides:
 
 If you do not set those variables, the sample uses the default DartStream dev
 hosts baked into `lib/config.dart`.
+
+## Firebase Hosting
+
+This repo includes Firebase Hosting config for the Flutter web output:
+
+- [`firebase.json`](firebase.json) serves `build/web`
+- [`.firebaserc`](.firebaserc) points the repo at the Firebase project that owns the Hosting site
+- `firebase.json` targets the Hosting site `sample-app-chukwuemeka-izukanne`
+- GitHub Actions creates preview URLs for branch pushes and pull requests, and deploys `main` to the live site
+
+For GitHub Actions deployment, add these secrets:
+
+- `FIREBASE_SERVICE_ACCOUNT_AORTEM_SAMPLE_APPS`
+
+Then the deploy workflow can publish the web bundle to the hosting site and
+create preview URLs automatically for feature branches / pull requests.
 
 ## Project structure
 
