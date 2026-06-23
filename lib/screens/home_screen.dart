@@ -77,6 +77,7 @@ class _HomeScreenState extends State<HomeScreen>
       final flagsList = _unwrapList(flags, const ['flags', 'data']);
       final inventoryItems = _unwrapInventory(inventory);
       final saved = _snapshotPayload(snapshot);
+      widget.session.updateFeatureFlags(flagsList);
 
       _state = _GameState.fromLiveData(
         displayName: _displayName,
@@ -84,6 +85,9 @@ class _HomeScreenState extends State<HomeScreen>
         flags: flagsList,
         inventory: inventoryItems,
         saved: saved,
+        doubleXpEnabled: widget.session.doubleXpEnabled,
+        hardModeEnabled: widget.session.hardModeEnabled,
+        darkThemeEnabled: widget.session.themeMode == ThemeMode.dark,
       );
 
       setState(() {
@@ -136,11 +140,14 @@ class _HomeScreenState extends State<HomeScreen>
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       body: Container(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF050B14), Color(0xFF091A2E), Color(0xFF16314A)],
+            colors: isDark
+                ? const [Color(0xFF050B14), Color(0xFF091A2E), Color(0xFF16314A)]
+                : const [Color(0xFFF7FAFE), Color(0xFFEAF1FB), Color(0xFFDCE7F7)],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
@@ -263,6 +270,9 @@ class _GameState {
     required this.inventorySummary,
     required this.recentEvents,
     required this.flags,
+    required this.doubleXpEnabled,
+    required this.hardModeEnabled,
+    required this.darkThemeEnabled,
     required this.lastSavedAt,
   });
 
@@ -281,6 +291,9 @@ class _GameState {
   final List<String> inventorySummary;
   final List<_EventItem> recentEvents;
   final List<dynamic> flags;
+  final bool doubleXpEnabled;
+  final bool hardModeEnabled;
+  final bool darkThemeEnabled;
   final DateTime? lastSavedAt;
 
   bool get bossReady => questProgress >= 100;
@@ -295,12 +308,21 @@ class _GameState {
 
   String get simpleStatus => 'Level $level • $xp XP • $gold gold';
 
+  String get difficultyLabel => hardModeEnabled ? 'Hard' : 'Normal';
+
+  String get xpBoostLabel => doubleXpEnabled ? '2x active' : 'Standard';
+
+  String get themeLabel => darkThemeEnabled ? 'Dark' : 'Light';
+
   factory _GameState.fromLiveData({
     required String displayName,
     required Map<String, dynamic> profileData,
     required List<dynamic> flags,
     required List<dynamic> inventory,
     required Map<String, dynamic> saved,
+    required bool doubleXpEnabled,
+    required bool hardModeEnabled,
+    required bool darkThemeEnabled,
   }) {
     final snapshot = _flattenSnapshot(saved);
     final savedName =
@@ -359,6 +381,9 @@ class _GameState {
         ),
       ],
       flags: flags,
+      doubleXpEnabled: doubleXpEnabled,
+      hardModeEnabled: hardModeEnabled,
+      darkThemeEnabled: darkThemeEnabled,
       lastSavedAt: _dateFromMap(snapshot, const ['lastSavedAt', 'updatedAt']),
     );
   }
@@ -379,6 +404,9 @@ class _GameState {
     List<String>? inventorySummary,
     List<_EventItem>? recentEvents,
     List<dynamic>? flags,
+    bool? doubleXpEnabled,
+    bool? hardModeEnabled,
+    bool? darkThemeEnabled,
     DateTime? lastSavedAt,
   }) {
     return _GameState(
@@ -397,6 +425,9 @@ class _GameState {
       inventorySummary: inventorySummary ?? this.inventorySummary,
       recentEvents: recentEvents ?? this.recentEvents,
       flags: flags ?? this.flags,
+      doubleXpEnabled: doubleXpEnabled ?? this.doubleXpEnabled,
+      hardModeEnabled: hardModeEnabled ?? this.hardModeEnabled,
+      darkThemeEnabled: darkThemeEnabled ?? this.darkThemeEnabled,
       lastSavedAt: lastSavedAt ?? this.lastSavedAt,
     );
   }
@@ -404,9 +435,10 @@ class _GameState {
   _GameState apply(_GameAction action, Random rng) {
     switch (action) {
       case _GameAction.explore:
-        final progressGain = 20 + rng.nextInt(16);
-        final xpGain = 10 + rng.nextInt(8);
-        final goldGain = 5 + rng.nextInt(6);
+        final progressGain = hardModeEnabled ? 14 + rng.nextInt(10) : 20 + rng.nextInt(16);
+        final xpGainBase = 10 + rng.nextInt(8);
+        final xpGain = xpGainBase * (doubleXpEnabled ? 2 : 1);
+        final goldGain = hardModeEnabled ? 3 + rng.nextInt(5) : 5 + rng.nextInt(6);
         final nextProgress = (questProgress + progressGain).clamp(0, 100);
         return _withEvent(
           copyWith(
@@ -421,7 +453,7 @@ class _GameState {
             lastSavedAt: DateTime.now().toUtc(),
           ),
           'Explored',
-          '+$progressGain quest, +$xpGain XP',
+          '+$progressGain quest, +$xpGain XP${doubleXpEnabled ? ' (2x)' : ''}',
           Icons.explore_rounded,
         );
       case _GameAction.fight:
@@ -436,12 +468,12 @@ class _GameState {
             Icons.lock_rounded,
           );
         }
-        final damage = 18 + rng.nextInt(15);
+        final damage = hardModeEnabled ? 14 + rng.nextInt(10) : 18 + rng.nextInt(15);
         final nextBoss = max(0, bossHealth - damage);
         final victory = nextBoss == 0;
         return _withEvent(
           copyWith(
-            xp: xp + (victory ? 35 : 12),
+            xp: xp + (victory ? (doubleXpEnabled ? 70 : 35) : (doubleXpEnabled ? 24 : 12)),
             gold: gold + (victory ? 25 : 8),
             health: max(0, health - 8),
             bossHealth: nextBoss,
@@ -457,7 +489,7 @@ class _GameState {
           Icons.flash_on_rounded,
         );
       case _GameAction.rest:
-        final healed = 12 + rng.nextInt(10);
+        final healed = hardModeEnabled ? 8 + rng.nextInt(8) : 12 + rng.nextInt(10);
         return _withEvent(
           copyWith(
             health: min(maxHealth, health + healed),
@@ -469,7 +501,7 @@ class _GameState {
           Icons.bedtime_rounded,
         );
       case _GameAction.loot:
-        final coins = 10 + rng.nextInt(16);
+        final coins = hardModeEnabled ? 8 + rng.nextInt(10) : 10 + rng.nextInt(16);
         return _withEvent(
           copyWith(
             gold: gold + coins,
@@ -641,6 +673,9 @@ class _StatusGrid extends StatelessWidget {
       _MiniStat(icon: Icons.favorite_rounded, label: 'Health', value: '${state.health}/${state.maxHealth}'),
       _MiniStat(icon: Icons.savings_rounded, label: 'Gold', value: '${state.gold}'),
       _MiniStat(icon: Icons.workspace_premium_rounded, label: 'Level', value: '${state.level}'),
+      _MiniStat(icon: Icons.trending_up_rounded, label: 'XP boost', value: state.xpBoostLabel),
+      _MiniStat(icon: Icons.sports_mma_rounded, label: 'Difficulty', value: state.difficultyLabel),
+      _MiniStat(icon: Icons.palette_rounded, label: 'Theme', value: state.themeLabel),
     ];
 
     return Wrap(
@@ -884,13 +919,14 @@ class _MiniStat extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       width: 230,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF08111D),
+        color: isDark ? const Color(0xFF08111D) : const Color(0xFFF9FBFE),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFF2C4663)),
+        border: Border.all(color: isDark ? const Color(0xFF2C4663) : const Color(0xFFD0D9E6)),
       ),
       child: Row(
         children: [
@@ -902,7 +938,7 @@ class _MiniStat extends StatelessWidget {
               Text(
                 label,
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      color: const Color(0xFFB7C6DA),
+                      color: isDark ? const Color(0xFFB7C6DA) : const Color(0xFF526179),
                     ),
               ),
               const SizedBox(height: 4),
@@ -935,12 +971,13 @@ class _StepTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF08111D),
+        color: isDark ? const Color(0xFF08111D) : const Color(0xFFF9FBFE),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF22384F)),
+        border: Border.all(color: isDark ? const Color(0xFF22384F) : const Color(0xFFD0D9E6)),
       ),
       child: Row(
         children: [
@@ -954,7 +991,10 @@ class _StepTile extends StatelessWidget {
             ),
             child: Text(
               number,
-              style: const TextStyle(fontWeight: FontWeight.w900),
+              style: TextStyle(
+                fontWeight: FontWeight.w900,
+                color: isDark ? null : Theme.of(context).colorScheme.primary,
+              ),
             ),
           ),
           const SizedBox(width: 12),
@@ -974,7 +1014,7 @@ class _StepTile extends StatelessWidget {
                 Text(
                   body,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: const Color(0xFFB7C6DA),
+                        color: isDark ? const Color(0xFFB7C6DA) : const Color(0xFF526179),
                       ),
                 ),
               ],
@@ -993,12 +1033,13 @@ class _EventRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF08111D),
+        color: isDark ? const Color(0xFF08111D) : const Color(0xFFF9FBFE),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF22384F)),
+        border: Border.all(color: isDark ? const Color(0xFF22384F) : const Color(0xFFD0D9E6)),
       ),
       child: Row(
         children: [
@@ -1026,7 +1067,7 @@ class _EventRow extends StatelessWidget {
                 Text(
                   event.detail,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: const Color(0xFFB7C6DA),
+                        color: isDark ? const Color(0xFFB7C6DA) : const Color(0xFF526179),
                       ),
                 ),
               ],
@@ -1045,23 +1086,26 @@ class _CardShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            const Color(0xFF0D1726).withValues(alpha: 0.97),
-            const Color(0xFF07111C).withValues(alpha: 0.95),
+            (isDark ? const Color(0xFF0D1726) : const Color(0xFFFDFEFF))
+                .withValues(alpha: isDark ? 0.97 : 0.98),
+            (isDark ? const Color(0xFF07111C) : const Color(0xFFF1F5FB))
+                .withValues(alpha: isDark ? 0.95 : 0.98),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: const Color(0xFF2C4663)),
-        boxShadow: const [
+        border: Border.all(color: isDark ? const Color(0xFF2C4663) : const Color(0xFFD0D9E6)),
+        boxShadow: [
           BoxShadow(
-            color: Colors.black54,
+            color: isDark ? Colors.black54 : Colors.black12,
             blurRadius: 22,
-            offset: Offset(0, 12),
+            offset: const Offset(0, 12),
           ),
         ],
       ),
