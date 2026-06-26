@@ -21,6 +21,9 @@ class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
   static const _slotKey = 'quest';
   static const _doubleXpFlagKey = 'double_xp';
+  static const _lightModeFlagKey = 'light_mode';
+  static const _darkModeFlagKey = 'dark_mode';
+  static const _hardModeFlagKey = 'hard_mode';
 
   final _rng = Random();
   late final AnimationController _pulseController;
@@ -70,7 +73,8 @@ class _HomeScreenState extends State<HomeScreen>
         flags: widget.session.featureFlags,
         doubleXpEnabled: widget.session.doubleXpEnabled,
         hardModeEnabled: widget.session.hardModeEnabled,
-        darkThemeEnabled: widget.session.themeMode == ThemeMode.dark,
+        lightThemeEnabled: widget.session.lightThemeEnabled,
+        darkThemeEnabled: widget.session.darkThemeEnabled,
       );
     });
   }
@@ -109,7 +113,8 @@ class _HomeScreenState extends State<HomeScreen>
         saved: saved,
         doubleXpEnabled: widget.session.doubleXpEnabled,
         hardModeEnabled: widget.session.hardModeEnabled,
-        darkThemeEnabled: widget.session.themeMode == ThemeMode.dark,
+        lightThemeEnabled: widget.session.lightThemeEnabled,
+        darkThemeEnabled: widget.session.darkThemeEnabled,
       );
 
       setState(() {
@@ -139,7 +144,10 @@ class _HomeScreenState extends State<HomeScreen>
       _persistenceError = null;
     });
     try {
-      final providers = await _client.persistence.databaseProviders();
+      final providers = await _client.persistence.list(
+        '/database/providers',
+        session: _sdkSession,
+      );
       if (!mounted) return;
       setState(() {
         _databaseProviders = providers;
@@ -167,27 +175,13 @@ class _HomeScreenState extends State<HomeScreen>
       _featureFlagSaving = true;
     });
     try {
-      final flagExists = _featureFlagExists(_state.flags, _doubleXpFlagKey);
-      if (flagExists) {
-        await _client.platform.updateFeatureFlag(
-          _sdkSession,
-          _doubleXpFlagKey,
-          updates: {'enabled': enabled},
-        );
-      } else {
-        await _client.platform.createFeatureFlag(
-          _sdkSession,
-          flag: {
-            'key': _doubleXpFlagKey,
-            'name': 'Double XP',
-            'enabled': enabled,
-            'description': 'Doubles XP gains in the demo.',
-          },
-        );
-      }
-      final flags = await _client.platform.featureFlags(_sdkSession);
-      final flagsList = _unwrapList(flags, const ['flags', 'data']);
-      widget.session.updateFeatureFlags(flagsList);
+      await _writeFeatureFlag(
+        _doubleXpFlagKey,
+        enabled: enabled,
+        name: 'Double XP',
+        description: 'Doubles XP gains in the demo.',
+      );
+      final flagsList = await _refreshFeatureFlags();
       if (!mounted) return;
       setState(() {
         _state = _state.copyWith(
@@ -222,6 +216,152 @@ class _HomeScreenState extends State<HomeScreen>
         });
       }
     }
+  }
+
+  Future<void> _setThemeMode(ThemeMode mode) async {
+    if (_featureFlagSaving) {
+      return;
+    }
+    setState(() {
+      _featureFlagSaving = true;
+    });
+    try {
+      await Future.wait([
+        _writeFeatureFlag(
+          _lightModeFlagKey,
+          enabled: mode == ThemeMode.light,
+          name: 'Light mode',
+          description: 'Switches the app into the light theme.',
+        ),
+        _writeFeatureFlag(
+          _darkModeFlagKey,
+          enabled: mode == ThemeMode.dark,
+          name: 'Dark mode',
+          description: 'Switches the app into the dark theme.',
+        ),
+      ]);
+      final flagsList = await _refreshFeatureFlags();
+      if (!mounted) return;
+      setState(() {
+        _state = _state.copyWith(
+          flags: flagsList,
+          lightThemeEnabled: widget.session.lightThemeEnabled,
+          darkThemeEnabled: widget.session.darkThemeEnabled,
+          recentEvents: [
+            _EventItem(
+              title: mode == ThemeMode.light ? 'Light mode enabled' : 'Dark mode enabled',
+              detail: mode == ThemeMode.light
+                  ? 'The app switched to the light palette.'
+                  : 'The app switched to the dark palette.',
+              icon: mode == ThemeMode.light
+                  ? Icons.light_mode_rounded
+                  : Icons.dark_mode_rounded,
+            ),
+            ..._state.recentEvents,
+          ].take(4).toList(),
+        );
+      });
+    } catch (error) {
+      if (_isUnauthorized(error)) {
+        widget.session.signOut();
+        return;
+      }
+      if (mounted) {
+        setState(() {
+          _bootstrapError = error;
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _featureFlagSaving = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _toggleDifficulty(bool enabled) async {
+    if (_featureFlagSaving) {
+      return;
+    }
+    setState(() {
+      _featureFlagSaving = true;
+    });
+    try {
+      await _writeFeatureFlag(
+        _hardModeFlagKey,
+        enabled: enabled,
+        name: 'Hard mode',
+        description: 'Makes the quest run more demanding.',
+      );
+      final flagsList = await _refreshFeatureFlags();
+      if (!mounted) return;
+      setState(() {
+        _state = _state.copyWith(
+          flags: flagsList,
+          hardModeEnabled: widget.session.hardModeEnabled,
+          recentEvents: [
+            _EventItem(
+              title: enabled ? 'Hard mode enabled' : 'Hard mode disabled',
+              detail: enabled
+                  ? 'Enemies hit harder and rewards are tighter.'
+                  : 'The quest returns to normal difficulty.',
+              icon: enabled ? Icons.whatshot_rounded : Icons.shield_outlined,
+            ),
+            ..._state.recentEvents,
+          ].take(4).toList(),
+        );
+      });
+    } catch (error) {
+      if (_isUnauthorized(error)) {
+        widget.session.signOut();
+        return;
+      }
+      if (mounted) {
+        setState(() {
+          _bootstrapError = error;
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _featureFlagSaving = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _writeFeatureFlag(
+    String key, {
+    required bool enabled,
+    required String name,
+    required String description,
+  }) async {
+    final flagExists = _featureFlagExists(_state.flags, key);
+    if (flagExists) {
+      await _client.platform.updateFeatureFlag(
+        _sdkSession,
+        key,
+        updates: {'enabled': enabled},
+      );
+    } else {
+      await _client.platform.createFeatureFlag(
+        _sdkSession,
+        flag: {
+          'key': key,
+          'name': name,
+          'enabled': enabled,
+          'description': description,
+        },
+      );
+    }
+  }
+
+  Future<List<dynamic>> _refreshFeatureFlags() async {
+    final flags = await _client.platform.featureFlags(_sdkSession);
+    final flagsList = _unwrapList(flags, const ['flags', 'data']);
+    widget.session.updateFeatureFlags(flagsList);
+    return flagsList;
   }
 
   void _queueSave() {
@@ -370,6 +510,8 @@ class _HomeScreenState extends State<HomeScreen>
                   persistenceLoading: _persistenceLoading,
                   featureFlagSaving: _featureFlagSaving,
                   onToggleDoubleXp: _toggleDoubleXp,
+                  onSetThemeMode: _setThemeMode,
+                  onToggleDifficulty: _toggleDifficulty,
                   onRefreshPersistence: _loadPersistencePanel,
                 ),
                 const SizedBox(height: 16),
@@ -415,6 +557,7 @@ class _GameState {
     required this.flags,
     required this.doubleXpEnabled,
     required this.hardModeEnabled,
+    required this.lightThemeEnabled,
     required this.darkThemeEnabled,
     required this.lastSavedAt,
   });
@@ -436,6 +579,7 @@ class _GameState {
   final List<dynamic> flags;
   final bool doubleXpEnabled;
   final bool hardModeEnabled;
+  final bool lightThemeEnabled;
   final bool darkThemeEnabled;
   final DateTime? lastSavedAt;
 
@@ -455,7 +599,7 @@ class _GameState {
 
   String get xpBoostLabel => doubleXpEnabled ? '2x active' : 'Standard';
 
-  String get themeLabel => darkThemeEnabled ? 'Dark' : 'Light';
+  String get themeLabel => lightThemeEnabled ? 'Light' : 'Dark';
 
   factory _GameState.fromLiveData({
     required String displayName,
@@ -465,6 +609,7 @@ class _GameState {
     required Map<String, dynamic> saved,
     required bool doubleXpEnabled,
     required bool hardModeEnabled,
+    required bool lightThemeEnabled,
     required bool darkThemeEnabled,
   }) {
     final snapshot = _flattenSnapshot(saved);
@@ -526,6 +671,7 @@ class _GameState {
       flags: flags,
       doubleXpEnabled: doubleXpEnabled,
       hardModeEnabled: hardModeEnabled,
+      lightThemeEnabled: lightThemeEnabled,
       darkThemeEnabled: darkThemeEnabled,
       lastSavedAt: _dateFromMap(snapshot, const ['lastSavedAt', 'updatedAt']),
     );
@@ -549,6 +695,7 @@ class _GameState {
     List<dynamic>? flags,
     bool? doubleXpEnabled,
     bool? hardModeEnabled,
+    bool? lightThemeEnabled,
     bool? darkThemeEnabled,
     DateTime? lastSavedAt,
   }) {
@@ -570,6 +717,7 @@ class _GameState {
       flags: flags ?? this.flags,
       doubleXpEnabled: doubleXpEnabled ?? this.doubleXpEnabled,
       hardModeEnabled: hardModeEnabled ?? this.hardModeEnabled,
+      lightThemeEnabled: lightThemeEnabled ?? this.lightThemeEnabled,
       darkThemeEnabled: darkThemeEnabled ?? this.darkThemeEnabled,
       lastSavedAt: lastSavedAt ?? this.lastSavedAt,
     );
@@ -837,6 +985,8 @@ class _PlatformDemoRow extends StatelessWidget {
     required this.persistenceLoading,
     required this.featureFlagSaving,
     required this.onToggleDoubleXp,
+    required this.onSetThemeMode,
+    required this.onToggleDifficulty,
     required this.onRefreshPersistence,
   });
 
@@ -846,6 +996,8 @@ class _PlatformDemoRow extends StatelessWidget {
   final bool persistenceLoading;
   final bool featureFlagSaving;
   final ValueChanged<bool> onToggleDoubleXp;
+  final ValueChanged<ThemeMode> onSetThemeMode;
+  final ValueChanged<bool> onToggleDifficulty;
   final VoidCallback onRefreshPersistence;
 
   @override
@@ -857,6 +1009,8 @@ class _PlatformDemoRow extends StatelessWidget {
           state: state,
           saving: featureFlagSaving,
           onToggleDoubleXp: onToggleDoubleXp,
+          onSetThemeMode: onSetThemeMode,
+          onToggleDifficulty: onToggleDifficulty,
         );
         final persistencePanel = _PersistencePanel(
           providers: databaseProviders,
@@ -891,16 +1045,26 @@ class _FeatureFlagPanel extends StatelessWidget {
     required this.state,
     required this.saving,
     required this.onToggleDoubleXp,
+    required this.onSetThemeMode,
+    required this.onToggleDifficulty,
   });
 
   final _GameState state;
   final bool saving;
   final ValueChanged<bool> onToggleDoubleXp;
+  final ValueChanged<ThemeMode> onSetThemeMode;
+  final ValueChanged<bool> onToggleDifficulty;
 
   @override
   Widget build(BuildContext context) {
-    final enabled = _featureFlagEnabled(state.flags, _HomeScreenState._doubleXpFlagKey);
-    final exists = _featureFlagExists(state.flags, _HomeScreenState._doubleXpFlagKey);
+    final doubleXpEnabled = _featureFlagEnabled(state.flags, _HomeScreenState._doubleXpFlagKey);
+    final doubleXpExists = _featureFlagExists(state.flags, _HomeScreenState._doubleXpFlagKey);
+    final lightExists = _featureFlagExists(state.flags, _HomeScreenState._lightModeFlagKey);
+    final darkExists = _featureFlagExists(state.flags, _HomeScreenState._darkModeFlagKey);
+    final hardModeEnabled = _featureFlagEnabled(state.flags, _HomeScreenState._hardModeFlagKey);
+    final hardModeExists = _featureFlagExists(state.flags, _HomeScreenState._hardModeFlagKey);
+    final lightModeEnabled = state.lightThemeEnabled;
+    final darkModeEnabled = state.darkThemeEnabled;
     return _CardShell(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -923,8 +1087,8 @@ class _FeatureFlagPanel extends StatelessWidget {
                 )
               else
                 Icon(
-                  enabled ? Icons.toggle_on_rounded : Icons.toggle_off_rounded,
-                  color: enabled
+                  doubleXpEnabled ? Icons.toggle_on_rounded : Icons.toggle_off_rounded,
+                  color: doubleXpEnabled
                       ? Theme.of(context).colorScheme.secondary
                       : const Color(0xFF8A97A8),
                 ),
@@ -932,55 +1096,158 @@ class _FeatureFlagPanel extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'The demo reads the live tenant flag list and uses `double_xp` to drive XP gains.',
+            'The demo reads the live tenant flag list and uses `double_xp`, theme, and difficulty flags to shape the run.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: const Color(0xFFB7C6DA),
                 ),
           ),
           const SizedBox(height: 14),
+          Text(
+            'XP',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            doubleXpExists
+                ? 'double_xp is already seeded in this tenant.'
+                : 'Turning this on seeds the double_xp flag in the tenant.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: const Color(0xFFB7C6DA),
+                ),
+          ),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'double_xp',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w800,
-                          ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      exists
-                          ? 'Already seeded in this tenant. Flip it on or off to watch the boost change live.'
-                          : 'Not created yet. Turning this on seeds the flag in the tenant.',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: const Color(0xFFB7C6DA),
-                          ),
-                    ),
-                  ],
+                child: Text(
+                  'Double XP',
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
                 ),
               ),
-              const SizedBox(width: 12),
               Switch(
-                value: enabled,
+                value: doubleXpEnabled,
                 onChanged: saving ? null : onToggleDoubleXp,
               ),
             ],
+          ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _StatusPill(
+                label: doubleXpEnabled ? '2x active' : 'Standard',
+                icon: doubleXpEnabled ? Icons.bolt_rounded : Icons.speed_rounded,
+              ),
+              _StatusPill(
+                label: doubleXpExists ? 'Stored in tenant' : 'Create on toggle',
+                icon: doubleXpExists ? Icons.verified_rounded : Icons.add_circle_outline_rounded,
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Text(
+            'Theme',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'light_mode and dark_mode control the app palette. Light wins if both are enabled.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: const Color(0xFFB7C6DA),
+                ),
           ),
           const SizedBox(height: 12),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
+              _FlagChoiceChip(
+                label: 'Light',
+                icon: Icons.light_mode_rounded,
+                selected: lightModeEnabled,
+                enabled: !saving,
+                onSelected: () => onSetThemeMode(ThemeMode.light),
+              ),
+              _FlagChoiceChip(
+                label: 'Dark',
+                icon: Icons.dark_mode_rounded,
+                selected: darkModeEnabled,
+                enabled: !saving,
+                onSelected: () => onSetThemeMode(ThemeMode.dark),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
               _StatusPill(
-                label: enabled ? '2x active' : 'Standard',
-                icon: enabled ? Icons.bolt_rounded : Icons.speed_rounded,
+                label: lightExists ? 'light_mode seeded' : 'light_mode not seeded',
+                icon: lightModeEnabled ? Icons.wb_sunny_rounded : Icons.invert_colors_rounded,
               ),
               _StatusPill(
-                label: exists ? 'Stored in tenant' : 'Create on toggle',
-                icon: exists ? Icons.verified_rounded : Icons.add_circle_outline_rounded,
+                label: darkExists ? 'dark_mode seeded' : 'dark_mode not seeded',
+                icon: darkModeEnabled ? Icons.nightlight_round_rounded : Icons.invert_colors_rounded,
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Text(
+            'Difficulty',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'hard_mode makes the quest tougher and the enemy less forgiving.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: const Color(0xFFB7C6DA),
+                ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _FlagChoiceChip(
+                  label: 'Normal',
+                  icon: Icons.shield_outlined,
+                  selected: !hardModeEnabled,
+                  enabled: !saving,
+                  onSelected: () => onToggleDifficulty(false),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _FlagChoiceChip(
+                  label: 'Hard',
+                  icon: Icons.whatshot_rounded,
+                  selected: hardModeEnabled,
+                  enabled: !saving,
+                  onSelected: () => onToggleDifficulty(true),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _StatusPill(
+                label: hardModeEnabled ? 'Hard active' : 'Normal pace',
+                icon: hardModeEnabled ? Icons.whatshot_rounded : Icons.shield_outlined,
+              ),
+              _StatusPill(
+                label: hardModeExists ? 'hard_mode seeded' : 'hard_mode not seeded',
+                icon: hardModeExists ? Icons.verified_rounded : Icons.add_circle_outline_rounded,
               ),
             ],
           ),
@@ -1104,6 +1371,56 @@ class _StatusPill extends StatelessWidget {
           const SizedBox(width: 8),
           Text(label),
         ],
+      ),
+    );
+  }
+}
+
+class _FlagChoiceChip extends StatelessWidget {
+  const _FlagChoiceChip({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.enabled,
+    required this.onSelected,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final bool enabled;
+  final VoidCallback onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final activeColor = Theme.of(context).colorScheme.secondary.withValues(alpha: 0.22);
+    final baseColor = isDark ? const Color(0xFF08111D) : const Color(0xFFF9FBFE);
+    return ChoiceChip(
+      avatar: Icon(
+        icon,
+        size: 16,
+        color: selected
+            ? Theme.of(context).colorScheme.secondary
+            : (isDark ? const Color(0xFFB7C6DA) : const Color(0xFF526179)),
+      ),
+      selected: selected,
+      onSelected: enabled ? (_) => onSelected() : null,
+      selectedColor: activeColor,
+      backgroundColor: baseColor,
+      side: BorderSide(
+        color: selected
+            ? Theme.of(context).colorScheme.secondary
+            : (isDark ? const Color(0xFF2C4663) : const Color(0xFFD0D9E6)),
+      ),
+      label: Text(
+        label,
+        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: selected
+                  ? Theme.of(context).colorScheme.onSecondaryContainer
+                  : (isDark ? const Color(0xFFEAF2FF) : const Color(0xFF1F2937)),
+            ),
       ),
     );
   }
