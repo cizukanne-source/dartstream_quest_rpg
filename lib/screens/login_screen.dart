@@ -18,6 +18,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _email = TextEditingController();
   final _password = TextEditingController();
   final _confirm = TextEditingController();
+  final _displayName = TextEditingController(text: 'Nova Runner');
 
 
   AuthMode _mode = AuthMode.signUp;
@@ -28,6 +29,7 @@ class _LoginScreenState extends State<LoginScreen> {
     _email.dispose();
     _password.dispose();
     _confirm.dispose();
+    _displayName.dispose();
     super.dispose();
   }
 
@@ -64,11 +66,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
     final email = _email.text.trim();
     final password = _password.text;
+    final displayName = _displayName.text.trim();
 
     if (_isSignUp) {
-      widget.session.signUp(email, password);
+      widget.session.signUp(email, password, displayName: displayName);
     } else {
-      widget.session.signIn(email, password);
+      widget.session.signIn(email, password, displayName: displayName);
     }
   }
 
