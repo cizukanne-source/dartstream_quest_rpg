@@ -72,6 +72,7 @@ not already present in your `cmd` session. It expects:
 - `OAUTH2_CLIENT_ID`
 - `OAUTH2_CLIENT_SECRET`
 - optional `OAUTH2_SCOPE`
+- optional `OAUTH2_ISSUER` to pin the token issuer claim if you want an exact match
 - optional `API_BILLING` if your token endpoint is not the default
 
 Example:
@@ -85,8 +86,21 @@ API_BILLING=https://dev-apibilling.dartstream.io
 What the harness does:
 
 - exchanges `client_id` + `client_secret` for a DartStream Bearer token
+- validates the JWT header uses `RS256`
+- checks the token is not expired and is valid for the current time window
 - decodes the JWT claims so you can confirm tenant/scope are present
 - probes a few DartStream service endpoints with Bearer-only requests
+- exits with a non-zero code if any verification step fails
+
+## OAuth2 verification checklist
+
+Run this when you want to confirm the OAuth2 client is still healthy:
+
+1. Set `OAUTH2_CLIENT_ID` and `OAUTH2_CLIENT_SECRET` in `.env` or your shell.
+2. Optionally set `OAUTH2_ISSUER` if you want the token issuer to match exactly.
+3. Run `dart run bin\oauth2_deepdive.dart`.
+4. Confirm the output shows `PASS` for token checks and all endpoint probes.
+5. If any probe returns `401` or `403`, treat the client as unhealthy and recheck the client registration / issuer allowlist.
 
 ## Firebase Hosting
 

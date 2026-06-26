@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:dartstream_quest_rpg/verification/oauth2_verifier.dart';
+
 class _Env {
   _Env._(this.values);
 
@@ -97,17 +99,39 @@ Future<void> main() async {
     scope: requestedScope.isEmpty ? null : requestedScope,
   );
 
-  final claims = _decodeJwtClaims(token.accessToken);
+  final verification = inspectJwtAccessToken(
+    token.accessToken,
+    expectedIssuer: env.optional('OAUTH2_ISSUER'),
+  );
 
   stdout.writeln('OAuth2 token minted successfully');
   stdout.writeln('  token_type: ${token.tokenType}');
   if (token.expiresIn != null) {
     stdout.writeln('  expires_in: ${token.expiresIn}s');
   }
-  stdout.writeln('  tenant: ${_claimAsString(claims, const ['tenant', 'tenant_id', 'tenantId', 'tid']) ?? '(missing)'}');
-  stdout.writeln('  scope: ${_claimAsString(claims, const ['scope']) ?? '(missing)'}');
-  stdout.writeln('  subject: ${_claimAsString(claims, const ['sub', 'subject']) ?? '(missing)'}');
+  stdout.writeln('  ${verification.summary()}');
+  stdout.writeln(
+    '  tenant: ${_claimAsString(verification.claims, const ['tenant', 'tenant_id', 'tenantId', 'tid']) ?? '(missing)'}',
+  );
+  stdout.writeln('  scope: ${_claimAsString(verification.claims, const ['scope']) ?? '(missing)'}');
   stdout.writeln();
+
+  if (verification.passed) {
+    stdout.writeln('Token checks');
+    stdout.writeln('PASS  JWT header uses RS256');
+    stdout.writeln('PASS  JWT is not expired');
+    stdout.writeln('PASS  JWT is valid for the current time window');
+    if (verification.issuer != null) {
+      stdout.writeln('PASS  Issuer claim present: ${verification.issuer}');
+    } else {
+      stdout.writeln('FAIL  Issuer claim missing');
+    }
+  } else {
+    stdout.writeln('Token checks');
+    for (final issue in verification.issues) {
+      stdout.writeln('FAIL  $issue');
+    }
+  }
 
   final probes = <_Probe>[
     _Probe(
@@ -142,6 +166,12 @@ Future<void> main() async {
       '${result.label.padRight(30)}  '
       '${result.summary}',
     );
+  }
+
+  final tokenPassed = verification.passed && verification.issuer != null;
+  final endpointPassed = results.every((result) => result.pass);
+  if (!tokenPassed || !endpointPassed) {
+    exitCode = 1;
   }
 }
 
@@ -222,20 +252,6 @@ Map<String, dynamic> _decodeJson(String body, {required String context}) {
   } catch (error) {
     throw FormatException('$context was not valid JSON: $body', error);
   }
-}
-
-Map<String, dynamic> _decodeJwtClaims(String token) {
-  final parts = token.split('.');
-  if (parts.length < 2) {
-    throw FormatException('Expected a JWT access token but got: $token');
-  }
-  final payload = parts[1];
-  final normalized = payload.padRight(payload.length + ((4 - payload.length % 4) % 4), '=');
-  final decoded = utf8.decode(base64Url.decode(normalized));
-  final json = jsonDecode(decoded);
-  if (json is Map<String, dynamic>) return json;
-  if (json is Map) return Map<String, dynamic>.from(json);
-  throw FormatException('JWT payload was not a JSON object: $decoded');
 }
 
 String? _claimAsString(Map<String, dynamic> claims, List<String> keys) {
