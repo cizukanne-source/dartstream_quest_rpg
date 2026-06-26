@@ -20,13 +20,18 @@ enum _LoadStatus { loading, ready, error }
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
   static const _slotKey = 'quest';
+  static const _doubleXpFlagKey = 'double_xp';
 
   final _rng = Random();
   late final AnimationController _pulseController;
 
   _LoadStatus _status = _LoadStatus.loading;
   Object? _bootstrapError;
+  Object? _persistenceError;
   Timer? _saveDebounce;
+  bool _persistenceLoading = false;
+  bool _featureFlagSaving = false;
+  List<dynamic> _databaseProviders = const [];
 
   late _GameState _state;
 
@@ -40,6 +45,7 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void initState() {
     super.initState();
+    widget.session.addListener(_handleSessionChanged);
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 8),
@@ -49,15 +55,31 @@ class _HomeScreenState extends State<HomeScreen>
 
   @override
   void dispose() {
+    widget.session.removeListener(_handleSessionChanged);
     _pulseController.dispose();
     _saveDebounce?.cancel();
     super.dispose();
+  }
+
+  void _handleSessionChanged() {
+    if (!mounted || _status != _LoadStatus.ready) {
+      return;
+    }
+    setState(() {
+      _state = _state.copyWith(
+        flags: widget.session.featureFlags,
+        doubleXpEnabled: widget.session.doubleXpEnabled,
+        hardModeEnabled: widget.session.hardModeEnabled,
+        darkThemeEnabled: widget.session.themeMode == ThemeMode.dark,
+      );
+    });
   }
 
   Future<void> _bootstrap() async {
     setState(() {
       _status = _LoadStatus.loading;
       _bootstrapError = null;
+      _persistenceError = null;
     });
 
     try {
@@ -93,6 +115,7 @@ class _HomeScreenState extends State<HomeScreen>
       setState(() {
         _status = _LoadStatus.ready;
       });
+      unawaited(_loadPersistencePanel());
     } catch (error) {
       if (_isUnauthorized(error)) {
         widget.session.signOut();
@@ -106,6 +129,100 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _refresh() => _bootstrap();
+
+  Future<void> _loadPersistencePanel() async {
+    if (_persistenceLoading) {
+      return;
+    }
+    setState(() {
+      _persistenceLoading = true;
+      _persistenceError = null;
+    });
+    try {
+      final providers = await _client.persistence.databaseProviders();
+      if (!mounted) return;
+      setState(() {
+        _databaseProviders = providers;
+        _persistenceLoading = false;
+      });
+    } catch (error) {
+      if (_isUnauthorized(error)) {
+        widget.session.signOut();
+        return;
+      }
+      if (!mounted) return;
+      setState(() {
+        _databaseProviders = const [];
+        _persistenceError = error;
+        _persistenceLoading = false;
+      });
+    }
+  }
+
+  Future<void> _toggleDoubleXp(bool enabled) async {
+    if (_featureFlagSaving) {
+      return;
+    }
+    setState(() {
+      _featureFlagSaving = true;
+    });
+    try {
+      final flagExists = _featureFlagExists(_state.flags, _doubleXpFlagKey);
+      if (flagExists) {
+        await _client.platform.updateFeatureFlag(
+          _sdkSession,
+          _doubleXpFlagKey,
+          updates: {'enabled': enabled},
+        );
+      } else {
+        await _client.platform.createFeatureFlag(
+          _sdkSession,
+          flag: {
+            'key': _doubleXpFlagKey,
+            'name': 'Double XP',
+            'enabled': enabled,
+            'description': 'Doubles XP gains in the demo.',
+          },
+        );
+      }
+      final flags = await _client.platform.featureFlags(_sdkSession);
+      final flagsList = _unwrapList(flags, const ['flags', 'data']);
+      widget.session.updateFeatureFlags(flagsList);
+      if (!mounted) return;
+      setState(() {
+        _state = _state.copyWith(
+          flags: flagsList,
+          doubleXpEnabled: widget.session.doubleXpEnabled,
+          recentEvents: [
+            _EventItem(
+              title: enabled ? 'Double XP enabled' : 'Double XP disabled',
+              detail: enabled
+                  ? 'The quest now pays out 2x XP.'
+                  : 'XP returns to standard pace.',
+              icon: Icons.flag_rounded,
+            ),
+            ..._state.recentEvents,
+          ].take(4).toList(),
+        );
+      });
+    } catch (error) {
+      if (_isUnauthorized(error)) {
+        widget.session.signOut();
+        return;
+      }
+      if (mounted) {
+        setState(() {
+          _bootstrapError = error;
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _featureFlagSaving = false;
+        });
+      }
+    }
+  }
 
   void _queueSave() {
     _saveDebounce?.cancel();
@@ -246,6 +363,16 @@ class _HomeScreenState extends State<HomeScreen>
                 const SizedBox(height: 16),
                 _StatusGrid(state: state),
                 const SizedBox(height: 16),
+                _PlatformDemoRow(
+                  state: state,
+                  databaseProviders: _databaseProviders,
+                  persistenceError: _persistenceError,
+                  persistenceLoading: _persistenceLoading,
+                  featureFlagSaving: _featureFlagSaving,
+                  onToggleDoubleXp: _toggleDoubleXp,
+                  onRefreshPersistence: _loadPersistencePanel,
+                ),
+                const SizedBox(height: 16),
                 _GoalCard(state: state),
                 const SizedBox(height: 16),
                 _ActionRow(
@@ -322,7 +449,7 @@ class _GameState {
     return 'You are close. Keep exploring.';
   }
 
-  String get simpleStatus => 'Level $level • $xp XP • $gold gold';
+  String get simpleStatus => 'Level $level | $xp XP | $gold gold';
 
   String get difficultyLabel => hardModeEnabled ? 'Hard' : 'Normal';
 
@@ -698,6 +825,286 @@ class _StatusGrid extends StatelessWidget {
       spacing: 12,
       runSpacing: 12,
       children: cards,
+    );
+  }
+}
+
+class _PlatformDemoRow extends StatelessWidget {
+  const _PlatformDemoRow({
+    required this.state,
+    required this.databaseProviders,
+    required this.persistenceError,
+    required this.persistenceLoading,
+    required this.featureFlagSaving,
+    required this.onToggleDoubleXp,
+    required this.onRefreshPersistence,
+  });
+
+  final _GameState state;
+  final List<dynamic> databaseProviders;
+  final Object? persistenceError;
+  final bool persistenceLoading;
+  final bool featureFlagSaving;
+  final ValueChanged<bool> onToggleDoubleXp;
+  final VoidCallback onRefreshPersistence;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final narrow = constraints.maxWidth < 760;
+        final featurePanel = _FeatureFlagPanel(
+          state: state,
+          saving: featureFlagSaving,
+          onToggleDoubleXp: onToggleDoubleXp,
+        );
+        final persistencePanel = _PersistencePanel(
+          providers: databaseProviders,
+          loading: persistenceLoading,
+          error: persistenceError,
+          onRefresh: onRefreshPersistence,
+        );
+        if (narrow) {
+          return Column(
+            children: [
+              featurePanel,
+              const SizedBox(height: 12),
+              persistencePanel,
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: featurePanel),
+            const SizedBox(width: 12),
+            Expanded(child: persistencePanel),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _FeatureFlagPanel extends StatelessWidget {
+  const _FeatureFlagPanel({
+    required this.state,
+    required this.saving,
+    required this.onToggleDoubleXp,
+  });
+
+  final _GameState state;
+  final bool saving;
+  final ValueChanged<bool> onToggleDoubleXp;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = _featureFlagEnabled(state.flags, _HomeScreenState._doubleXpFlagKey);
+    final exists = _featureFlagExists(state.flags, _HomeScreenState._doubleXpFlagKey);
+    return _CardShell(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Feature flags',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+              ),
+              if (saving)
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else
+                Icon(
+                  enabled ? Icons.toggle_on_rounded : Icons.toggle_off_rounded,
+                  color: enabled
+                      ? Theme.of(context).colorScheme.secondary
+                      : const Color(0xFF8A97A8),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'The demo reads the live tenant flag list and uses `double_xp` to drive XP gains.',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: const Color(0xFFB7C6DA),
+                ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'double_xp',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      exists
+                          ? 'Already seeded in this tenant. Flip it on or off to watch the boost change live.'
+                          : 'Not created yet. Turning this on seeds the flag in the tenant.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: const Color(0xFFB7C6DA),
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Switch(
+                value: enabled,
+                onChanged: saving ? null : onToggleDoubleXp,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _StatusPill(
+                label: enabled ? '2x active' : 'Standard',
+                icon: enabled ? Icons.bolt_rounded : Icons.speed_rounded,
+              ),
+              _StatusPill(
+                label: exists ? 'Stored in tenant' : 'Create on toggle',
+                icon: exists ? Icons.verified_rounded : Icons.add_circle_outline_rounded,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PersistencePanel extends StatelessWidget {
+  const _PersistencePanel({
+    required this.providers,
+    required this.loading,
+    required this.error,
+    required this.onRefresh,
+  });
+
+  final List<dynamic> providers;
+  final bool loading;
+  final Object? error;
+  final VoidCallback onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    final labels = providers.map(_providerLabel).where((label) => label.isNotEmpty).toList();
+    return _CardShell(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Persistence',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: onRefresh,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Refresh'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'This panel calls the persistence service so the database providers are visible in the demo.',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: const Color(0xFFB7C6DA),
+                ),
+          ),
+          const SizedBox(height: 14),
+          if (loading)
+            const LinearProgressIndicator(minHeight: 6)
+          else if (error != null)
+            _StatusPill(
+              label: 'Unavailable',
+              icon: Icons.error_outline_rounded,
+            )
+          else
+            _StatusPill(
+              label: '${labels.length} provider${labels.length == 1 ? '' : 's'}',
+              icon: Icons.storage_rounded,
+            ),
+          const SizedBox(height: 12),
+          if (error != null)
+            Text(
+              '$error',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: const Color(0xFFF0B8C2),
+                  ),
+            )
+          else if (labels.isEmpty)
+            Text(
+              loading ? 'Loading provider list...' : 'No providers returned yet.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: const Color(0xFFB7C6DA),
+                  ),
+            )
+          else
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: labels
+                  .take(4)
+                  .map(
+                    (label) => _StatusPill(
+                      label: label,
+                      icon: Icons.dataset_rounded,
+                    ),
+                  )
+                  .toList(),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatusPill extends StatelessWidget {
+  const _StatusPill({required this.label, required this.icon});
+
+  final String label;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0A1626),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0xFF2C4663)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: Theme.of(context).colorScheme.secondary),
+          const SizedBox(width: 8),
+          Text(label),
+        ],
+      ),
     );
   }
 }
@@ -1276,3 +1683,111 @@ DateTime? _dateFromMap(Map? map, List<String> keys) {
 }
 
 int _defaultIfZero(int value, int fallback) => value == 0 ? fallback : value;
+
+bool _featureFlagExists(List<dynamic> flags, String key) {
+  for (final flag in flags) {
+    if (_flagMatches(flag, key)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool _featureFlagEnabled(List<dynamic> flags, String key) {
+  for (final flag in flags) {
+    if (_flagMatches(flag, key)) {
+      if (flag is String) {
+        return true;
+      }
+      return _flagIsEnabled(flag);
+    }
+  }
+  return false;
+}
+
+bool _flagMatches(dynamic flag, String key) {
+  if (flag is String) {
+    return flag == key;
+  }
+  if (flag is! Map) {
+    return false;
+  }
+  final map = flag is Map<String, dynamic>
+      ? flag
+      : Map<String, dynamic>.from(flag);
+  final candidates = [
+    map['key'],
+    map['flagKey'],
+    map['featureKey'],
+    map['name'],
+    map['id'],
+  ];
+  return candidates.any((value) => value is String && value == key);
+}
+
+bool _flagIsEnabled(dynamic flag) {
+  if (flag is bool) {
+    return flag;
+  }
+  if (flag is String) {
+    final normalized = flag.toLowerCase();
+    return normalized == 'true' ||
+        normalized == 'enabled' ||
+        normalized == 'on';
+  }
+  if (flag is! Map) {
+    return false;
+  }
+  final map = flag is Map<String, dynamic>
+      ? flag
+      : Map<String, dynamic>.from(flag);
+  final candidates = [
+    map['enabled'],
+    map['value'],
+    map['active'],
+    map['isEnabled'],
+    map['is_enabled'],
+  ];
+  for (final value in candidates) {
+    if (value is bool) {
+      return value;
+    }
+    if (value is String) {
+      final normalized = value.toLowerCase();
+      if (normalized == 'true' || normalized == 'enabled' || normalized == 'on') {
+        return true;
+      }
+      if (normalized == 'false' ||
+          normalized == 'disabled' ||
+          normalized == 'off') {
+        return false;
+      }
+    }
+  }
+  return false;
+}
+
+String _providerLabel(dynamic provider) {
+  if (provider is String) {
+    return provider;
+  }
+  if (provider is! Map) {
+    return provider.toString();
+  }
+  final map = provider is Map<String, dynamic>
+      ? provider
+      : Map<String, dynamic>.from(provider);
+  final candidates = [
+    map['name'],
+    map['label'],
+    map['provider'],
+    map['key'],
+    map['id'],
+  ];
+  for (final value in candidates) {
+    if (value is String && value.isNotEmpty) {
+      return value;
+    }
+  }
+  return map.toString();
+}

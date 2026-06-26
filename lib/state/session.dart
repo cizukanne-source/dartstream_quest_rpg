@@ -143,6 +143,9 @@ class Session extends ChangeNotifier {
   bool hasFeatureFlag(String key) {
     for (final flag in featureFlags) {
       if (_flagMatches(flag, key)) {
+        if (flag is String) {
+          return true;
+        }
         return _flagIsEnabled(flag);
       }
     }
