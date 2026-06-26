@@ -65,4 +65,7 @@ class AppConfig {
         persistenceBaseUrl: Uri.parse(persistenceHost),
         billingBaseUrl: Uri.parse(billingHost),
       );
+
+  /// Backwards-compatible alias for older call sites.
+  static DartStreamConfig get dartStream => dartStreamConfig;
 }

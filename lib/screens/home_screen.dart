@@ -30,7 +30,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   _LoadStatus _status = _LoadStatus.loading;
   Object? _bootstrapError;
-  Object? _persistenceError;
+  String? _persistenceError;
   Timer? _saveDebounce;
   bool _persistenceLoading = false;
   bool _featureFlagSaving = false;
@@ -120,7 +120,6 @@ class _HomeScreenState extends State<HomeScreen>
       setState(() {
         _status = _LoadStatus.ready;
       });
-      unawaited(_loadPersistencePanel());
     } catch (error) {
       if (_isUnauthorized(error)) {
         widget.session.signOut();
@@ -144,10 +143,7 @@ class _HomeScreenState extends State<HomeScreen>
       _persistenceError = null;
     });
     try {
-      final providers = await _client.persistence.list(
-        '/database/providers',
-        session: _sdkSession,
-      );
+      final providers = await _client.persistence.databaseProviders();
       if (!mounted) return;
       setState(() {
         _databaseProviders = providers;
@@ -161,7 +157,8 @@ class _HomeScreenState extends State<HomeScreen>
       if (!mounted) return;
       setState(() {
         _databaseProviders = const [];
-        _persistenceError = error;
+        _persistenceError =
+            'Persistence providers are temporarily unavailable. Try Refresh later.';
         _persistenceLoading = false;
       });
     }
