@@ -47,9 +47,44 @@ Optional backend overrides:
 - `API_EXPERIENCE`
 - `API_REACTIVE`
 - `API_PERSISTENCE`
+- `API_BILLING`
 
 If you do not set those variables, the sample uses the default public DartStream
 hosts baked into `lib/config.dart`.
+
+## OAuth2 / machine-to-machine
+
+The Flutter sample app itself still uses the public Firebase user flow. Keep the
+OAuth2 client secret on the backend side only.
+
+For a local machine-to-machine check, add these values to [`.env`](.env) and run
+the deep-dive harness:
+
+```cmd
+dart run bin\oauth2_deepdive.dart
+```
+
+The harness automatically reads `.env` from the project root if the variables are
+not already present in your `cmd` session. It expects:
+
+- `OAUTH2_CLIENT_ID`
+- `OAUTH2_CLIENT_SECRET`
+- optional `OAUTH2_SCOPE`
+- optional `API_BILLING` if your token endpoint is not the default
+
+Example:
+
+```env
+OAUTH2_CLIENT_ID=client_...
+OAUTH2_CLIENT_SECRET=secret_...
+API_BILLING=https://dev-apibilling.dartstream.io
+```
+
+What the harness does:
+
+- exchanges `client_id` + `client_secret` for a DartStream Bearer token
+- decodes the JWT claims so you can confirm tenant/scope are present
+- probes a few DartStream service endpoints with Bearer-only requests
 
 ## Firebase Hosting
 

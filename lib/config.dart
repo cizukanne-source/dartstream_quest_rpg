@@ -23,6 +23,7 @@ class AppConfig {
   static const _defaultReactiveHost = 'https://apireactive.dartstream.io';
   static const _defaultPersistenceHost =
       'https://apipersistence.dartstream.io';
+  static const _defaultBillingHost = 'https://apibilling.dartstream.io';
 
   static String get firebaseApiKey {
     final buildTimeKey = const String.fromEnvironment('FIREBASE_API_KEY').trim();
@@ -56,13 +57,18 @@ class AppConfig {
     return override.isNotEmpty ? override : _defaultPersistenceHost;
   }
 
+  static String get billingHost {
+    final override = const String.fromEnvironment('API_BILLING').trim();
+    return override.isNotEmpty ? override : _defaultBillingHost;
+  }
+
   static DartStreamConfig get dartStreamConfig => DartStreamConfig(
         authBaseUrl: Uri.parse(authHost),
         platformBaseUrl: Uri.parse(platformHost),
         experienceBaseUrl: Uri.parse(experienceHost),
         reactiveBaseUrl: Uri.parse(reactiveHost),
         persistenceBaseUrl: Uri.parse(persistenceHost),
-        billingBaseUrl: Uri.parse('https://apibilling.dartstream.io'),
+        billingBaseUrl: Uri.parse(billingHost),
         firebaseApiKey: firebaseApiKey,
       );
 }
