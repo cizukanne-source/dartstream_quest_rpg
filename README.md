@@ -9,9 +9,9 @@ It uses `dartstream_client` end-to-end:
 - live reads from profile, feature flags, inventory, and cloud-save services
 - writes back to cloud save and the reactive event log
 
-The app includes a built-in Firebase Web API key for the sample project, so it
-starts without extra `--dart-define` flags. You can still override it at build
-time if needed.
+The app is configured for the DartStream dev backend by default and expects the
+Firebase web API key to be provided at build time. No API key is committed in
+the source tree.
 
 ## What the app does
 
@@ -25,13 +25,13 @@ time if needed.
 
 ```sh
 flutter pub get
-flutter run -d chrome --web-port=3000
+flutter run -d chrome --web-port=3000 --dart-define=FIREBASE_API_KEY=your_web_key_here
 ```
 
 To build the production web bundle:
 
 ```sh
-flutter build web --release
+flutter build web --release --dart-define=FIREBASE_API_KEY=your_web_key_here
 ```
 
 To deploy to Firebase Hosting after building:
@@ -40,22 +40,24 @@ To deploy to Firebase Hosting after building:
 firebase deploy --only hosting
 ```
 
-Optional backend overrides:
+Required / optional build defines:
 
-- `API_AUTH`
-- `API_PLATFORM`
-- `API_EXPERIENCE`
-- `API_REACTIVE`
-- `API_PERSISTENCE`
-- `API_BILLING`
+- `FIREBASE_API_KEY` required for Firebase email/password auth in the web app
+- `API_AUTH` optional override for the auth service
+- `API_PLATFORM` optional override for the platform service
+- `API_EXPERIENCE` optional override for the experience service
+- `API_REACTIVE` optional override for the reactive service
+- `API_PERSISTENCE` optional override for the persistence service
+- `API_BILLING` optional override for the billing service
 
-If you do not set those variables, the sample uses the default public DartStream
+If you do not set the service overrides, the sample uses the DartStream dev
 hosts baked into `lib/config.dart`.
 
 ## OAuth2 / machine-to-machine
 
-The Flutter sample app itself still uses the public Firebase user flow. Keep the
-OAuth2 client secret on the backend side only.
+The Flutter sample app itself uses the Firebase user session flow. The OAuth2
+client-credentials grant is used by the separate deep-dive harness to mint a
+DartStream bearer token for service checks.
 
 For a local machine-to-machine check, add these values to [`.env`](.env) and run
 the deep-dive harness:

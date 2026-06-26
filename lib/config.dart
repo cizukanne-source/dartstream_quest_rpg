@@ -1,29 +1,22 @@
 import 'package:dartstream_client/dartstream_client.dart';
 
-/// Hosts and Firebase config for the live DartStream sample environment.
+/// Hosts and Firebase config for the DartStream sample environment.
 ///
-/// The sample uses the same auth pattern as the reference apps:
-/// - Firebase Identity Toolkit for the user-facing sign-up / sign-in step
-/// - DartStream backend bootstrap for tenant-aware session setup
+/// The app uses Firebase Identity Toolkit for the user-facing sign-up / sign-in
+/// step and then bootstraps a DartStream session for tenant-aware access.
 ///
-/// The app ships with the public sample Firebase web key baked in, and a
-/// build-time FIREBASE_API_KEY still overrides it when provided.
-///
-/// The backend hosts can also be overridden at build time with API_AUTH,
-/// API_PLATFORM, API_EXPERIENCE, API_REACTIVE, and API_PERSISTENCE.
+/// Build-time defines can override the Firebase API key and any service hosts.
 class AppConfig {
-  // This is a public Firebase web API key for the sample project.
-  // A build-time FIREBASE_API_KEY still overrides it when provided.
-  static const _defaultFirebaseApiKey =
-      '';
+  static const _defaultFirebaseApiKey = '';
 
-  static const _defaultAuthHost = 'https://apiauth.dartstream.io';
-  static const _defaultPlatformHost = 'https://apiplatform.dartstream.io';
-  static const _defaultExperienceHost = 'https://apiexperience.dartstream.io';
-  static const _defaultReactiveHost = 'https://apireactive.dartstream.io';
+  static const _defaultAuthHost = 'https://dev-apiauth.dartstream.io';
+  static const _defaultPlatformHost = 'https://dev-apiplatform.dartstream.io';
+  static const _defaultExperienceHost =
+      'https://dev-apiexperience.dartstream.io';
+  static const _defaultReactiveHost = 'https://dev-apireactive.dartstream.io';
   static const _defaultPersistenceHost =
-      'https://apipersistence.dartstream.io';
-  static const _defaultBillingHost = 'https://apibilling.dartstream.io';
+      'https://dev-apipersistence.dartstream.io';
+  static const _defaultBillingHost = 'https://dev-apibilling.dartstream.io';
 
   static String get firebaseApiKey {
     final buildTimeKey = const String.fromEnvironment('FIREBASE_API_KEY').trim();
@@ -62,13 +55,14 @@ class AppConfig {
     return override.isNotEmpty ? override : _defaultBillingHost;
   }
 
-  static DartStreamConfig get dartStreamConfig => DartStreamConfig(
+  static DartStreamConfig get dartStreamConfig => DartStreamConfig.dev(
+        firebaseApiKey: firebaseApiKey.isEmpty ? null : firebaseApiKey,
+      ).copyWith(
         authBaseUrl: Uri.parse(authHost),
         platformBaseUrl: Uri.parse(platformHost),
         experienceBaseUrl: Uri.parse(experienceHost),
         reactiveBaseUrl: Uri.parse(reactiveHost),
         persistenceBaseUrl: Uri.parse(persistenceHost),
         billingBaseUrl: Uri.parse(billingHost),
-        firebaseApiKey: firebaseApiKey,
       );
 }

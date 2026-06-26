@@ -86,7 +86,7 @@ Future<void> main() async {
   final clientSecret = env.require('OAUTH2_CLIENT_SECRET');
   final billingBaseUrl = env.optional(
     'API_BILLING',
-    fallback: 'https://apibilling.dartstream.io',
+    fallback: 'https://dev-apibilling.dartstream.io',
   );
   final requestedScope = env.optional('OAUTH2_SCOPE');
 

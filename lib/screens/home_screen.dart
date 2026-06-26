@@ -94,6 +94,10 @@ class _HomeScreenState extends State<HomeScreen>
         _status = _LoadStatus.ready;
       });
     } catch (error) {
+      if (_isUnauthorized(error)) {
+        widget.session.signOut();
+        return;
+      }
       setState(() {
         _status = _LoadStatus.error;
         _bootstrapError = error;
@@ -112,7 +116,11 @@ class _HomeScreenState extends State<HomeScreen>
           slotKey: _slotKey,
           payload: _state.toSnapshot(),
         );
-      } catch (_) {
+      } catch (error) {
+        if (_isUnauthorized(error)) {
+          widget.session.signOut();
+          return;
+        }
         // Keep the game playable if save sync briefly fails.
       }
     });
@@ -123,11 +131,19 @@ class _HomeScreenState extends State<HomeScreen>
       _state = _state.apply(action, _rng);
     });
     _queueSave();
-    await _client.reactive.trackEvent(
-      _sdkSession,
-      eventType: 'quest.action.${action.name}',
-      payload: _state.toSnapshot(),
-    );
+    try {
+      await _client.reactive.trackEvent(
+        _sdkSession,
+        eventType: 'quest.action.${action.name}',
+        payload: _state.toSnapshot(),
+      );
+    } catch (error) {
+      if (_isUnauthorized(error)) {
+        widget.session.signOut();
+        return;
+      }
+      // Keep gameplay responsive even if analytics briefly fails.
+    }
     if (mounted) setState(() {});
   }
 
@@ -1178,6 +1194,10 @@ Map<String, dynamic>? _unwrapMap(Map<String, dynamic> map, List<String> keys) {
     if (value is Map<String, dynamic>) return value;
   }
   return null;
+}
+
+bool _isUnauthorized(Object error) {
+  return error is DartStreamApiException && error.statusCode == 401;
 }
 
 List<dynamic> _unwrapList(dynamic value, List<String> keys) {

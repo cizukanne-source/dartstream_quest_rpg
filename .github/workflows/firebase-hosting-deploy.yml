@@ -25,7 +25,7 @@ jobs:
         run: flutter pub get
 
       - name: Build web
-        run: flutter build web --release
+        run: flutter build web --release --dart-define=FIREBASE_API_KEY=${{ secrets.FIREBASE_WEB_API_KEY }}
 
       - name: Deploy preview to Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0
@@ -53,7 +53,7 @@ jobs:
         run: flutter pub get
 
       - name: Build web
-        run: flutter build web --release
+        run: flutter build web --release --dart-define=FIREBASE_API_KEY=${{ secrets.FIREBASE_WEB_API_KEY }}
 
       - name: Deploy live to Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0

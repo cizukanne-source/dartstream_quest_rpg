@@ -103,6 +103,9 @@ class Session extends ChangeNotifier {
   String _friendlyApiError(DartStreamApiException error) {
     final raw = error.toString();
     final lower = raw.toLowerCase();
+    if (error.statusCode == 401) {
+      return 'Your session expired or was rejected. Sign in again to continue.';
+    }
     if (lower.contains('invalid issuer') ||
         lower.contains('token-verification-failed') ||
         lower.contains('invalid-token') ||
