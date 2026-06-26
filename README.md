@@ -48,7 +48,7 @@ Optional backend overrides:
 - `API_REACTIVE`
 - `API_PERSISTENCE`
 
-If you do not set those variables, the sample uses the default DartStream dev
+If you do not set those variables, the sample uses the default public DartStream
 hosts baked into `lib/config.dart`.
 
 ## Firebase Hosting

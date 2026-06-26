@@ -61,9 +61,7 @@ class Session extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final config = DartStreamConfig.dev(
-        firebaseApiKey: AppConfig.firebaseApiKey,
-      );
+      final config = AppConfig.dartStreamConfig;
       final connection = signUp
           ? await DartStreamClient.signUp(
               config: config,
