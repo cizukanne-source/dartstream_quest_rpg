@@ -18,6 +18,12 @@ Firebase web API key to be provided at build time. Optional `API_*` build
 defines can override the service hosts. No API key is committed in the source
 tree.
 
+IntelliToggle is wired in as a second feature-flag provider. A dashboard switch
+lets you enable or disable the provider at runtime, and when it is on the app
+evaluates the configured remote flag key through the IntelliToggle API. The
+provider choice is persisted locally, so it survives app restarts, and the
+remote flag now grants a small RPG reward bonus when it is enabled.
+
 ## What the app does
 
 - creates or signs in a Firebase user
@@ -54,9 +60,24 @@ Required / optional build defines:
 - `API_REACTIVE` optional override for the reactive service
 - `API_PERSISTENCE` optional override for the persistence service
 - `API_BILLING` optional override for the billing service
+- `INTELLITOGGLE_API_URL` optional override for the IntelliToggle API base URL
+- `INTELLITOGGLE_TOKEN_URL` optional override for the OAuth2 token endpoint
+- `INTELLITOGGLE_CLIENT_ID` required for IntelliToggle OAuth2
+- `INTELLITOGGLE_CLIENT_SECRET` required for IntelliToggle OAuth2
+- `INTELLITOGGLE_TENANT_ID` required for IntelliToggle OAuth2
+- `INTELLITOGGLE_PROJECT_ID` optional project identifier forwarded to requests
+- `INTELLITOGGLE_ENVIRONMENT` optional environment label, defaults to `production`
+- `INTELLITOGGLE_FLAG_KEY` required flag key the app evaluates
+- `INTELLITOGGLE_SCOPE` optional OAuth2 scope override
 
 If you do not set the service overrides, the sample uses the DartStream dev
 hosts baked into `lib/config.dart`.
+
+Example IntelliToggle build defines:
+
+```sh
+flutter run -d chrome --web-port=3000 --dart-define=FIREBASE_API_KEY=your_web_key_here --dart-define=INTELLITOGGLE_API_URL=https://dev-api.intellitoggle.com --dart-define=INTELLITOGGLE_TOKEN_URL=https://dev-api.intellitoggle.com/api/v1/oauth/token --dart-define=INTELLITOGGLE_CLIENT_ID=client_... --dart-define=INTELLITOGGLE_CLIENT_SECRET=cs_... --dart-define=INTELLITOGGLE_TENANT_ID=tenant_... --dart-define=INTELLITOGGLE_PROJECT_ID=proj_... --dart-define=INTELLITOGGLE_ENVIRONMENT=production --dart-define=INTELLITOGGLE_FLAG_KEY=your-flag-key
+```
 
 ## OAuth2 / machine-to-machine
 

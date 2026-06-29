@@ -3,7 +3,10 @@ import 'dart:math';
 
 import 'package:dartstream_client/dartstream_client.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../config.dart';
+import '../services/intellitoggle_service.dart';
 import '../state/session.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -20,6 +23,7 @@ enum _LoadStatus { loading, ready, error }
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
   static const _slotKey = 'quest';
+  static const _intelliToggleEnabledPrefKey = 'intellitoggle_enabled';
   static const _doubleXpFlagKey = 'double_xp';
   static const _lightModeFlagKey = 'light_mode';
   static const _darkModeFlagKey = 'dark_mode';
@@ -34,9 +38,14 @@ class _HomeScreenState extends State<HomeScreen>
   Timer? _saveDebounce;
   bool _persistenceLoading = false;
   bool _featureFlagSaving = false;
+  bool _intelliToggleEnabled = true;
+  bool _intelliToggleLoading = false;
+  IntelliToggleEvaluation? _intelliToggleEvaluation;
+  String? _intelliToggleError;
   List<dynamic> _databaseProviders = const [];
 
   late _GameState _state;
+  late final IntelliToggleService _intelliToggleService;
 
   DartStreamClient get _client => widget.session.client!;
   DartStreamSession get _sdkSession => widget.session.sdkSession!;
@@ -49,11 +58,12 @@ class _HomeScreenState extends State<HomeScreen>
   void initState() {
     super.initState();
     widget.session.addListener(_handleSessionChanged);
+    _intelliToggleService = IntelliToggleService();
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 8),
     )..repeat(reverse: true);
-    _bootstrap();
+    _initialize();
   }
 
   @override
@@ -61,7 +71,13 @@ class _HomeScreenState extends State<HomeScreen>
     widget.session.removeListener(_handleSessionChanged);
     _pulseController.dispose();
     _saveDebounce?.cancel();
+    _intelliToggleService.dispose();
     super.dispose();
+  }
+
+  Future<void> _initialize() async {
+    await _restoreIntelliToggleEnabled();
+    await _bootstrap();
   }
 
   void _handleSessionChanged() {
@@ -115,11 +131,14 @@ class _HomeScreenState extends State<HomeScreen>
         hardModeEnabled: widget.session.hardModeEnabled,
         lightThemeEnabled: widget.session.lightThemeEnabled,
         darkThemeEnabled: widget.session.darkThemeEnabled,
+        intelliToggleBonusEnabled: false,
       );
 
       setState(() {
         _status = _LoadStatus.ready;
       });
+
+      await _refreshIntelliToggle();
     } catch (error) {
       if (_isUnauthorized(error)) {
         widget.session.signOut();
@@ -162,6 +181,104 @@ class _HomeScreenState extends State<HomeScreen>
         _persistenceLoading = false;
       });
     }
+  }
+
+  Future<void> _refreshIntelliToggle() async {
+    if (!_intelliToggleEnabled || !_intelliToggleService.hasCredentials) {
+      if (!mounted) return;
+      setState(() {
+        _intelliToggleLoading = false;
+        _intelliToggleError = _intelliToggleService.hasCredentials
+            ? null
+            : 'Set INTELLITOGGLE_* build defines to enable the provider.';
+        _intelliToggleEvaluation = null;
+        _state = _state.copyWith(intelliToggleBonusEnabled: false);
+      });
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _intelliToggleLoading = true;
+      _intelliToggleError = null;
+    });
+
+    try {
+      final evaluation = await _intelliToggleService.evaluateFlag(
+        targetingKey: _intelliToggleTargetingKey,
+        attributes: {
+          'player': widget.session.email ?? widget.session.displayName ?? 'unknown',
+          'tenantId': widget.session.tenantId ?? '',
+        },
+      );
+      if (!mounted) return;
+      setState(() {
+        _intelliToggleEvaluation = evaluation;
+        _intelliToggleLoading = false;
+        _state = _state.copyWith(intelliToggleBonusEnabled: evaluation.enabled);
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _intelliToggleEvaluation = null;
+        _intelliToggleLoading = false;
+        _state = _state.copyWith(intelliToggleBonusEnabled: false);
+        _intelliToggleError = _friendlyIntelliToggleError(error);
+      });
+    }
+  }
+
+  Future<void> _setIntelliToggleEnabled(bool enabled) async {
+    if (_intelliToggleEnabled == enabled) {
+      return;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _intelliToggleEnabled = enabled;
+      _intelliToggleError = null;
+      if (!enabled) {
+        _intelliToggleEvaluation = null;
+        _intelliToggleLoading = false;
+        _state = _state.copyWith(intelliToggleBonusEnabled: false);
+      }
+    });
+    await prefs.setBool(_intelliToggleEnabledPrefKey, enabled);
+    if (enabled) {
+      await _refreshIntelliToggle();
+    }
+  }
+
+  Future<void> _restoreIntelliToggleEnabled() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final enabled = prefs.getBool(_intelliToggleEnabledPrefKey) ?? true;
+      if (!mounted) return;
+      setState(() {
+        _intelliToggleEnabled = enabled;
+      });
+    } catch (_) {
+      // Use the in-memory default if shared preferences are unavailable.
+    }
+  }
+
+  String get _intelliToggleTargetingKey =>
+      widget.session.userId ??
+      widget.session.email ??
+      'integration-smoke-test';
+
+  String _friendlyIntelliToggleError(Object error) {
+    final message = error.toString();
+    final lower = message.toLowerCase();
+    if (lower.contains('401') || lower.contains('unauthorized')) {
+      return 'IntelliToggle rejected the token. Check the client ID, secret, and tenant values.';
+    }
+    if (lower.contains('403') || lower.contains('forbidden')) {
+      return 'IntelliToggle denied the request. Confirm the tenant, project, and flag key are correct.';
+    }
+    if (lower.contains('flag') && lower.contains('not')) {
+      return 'The configured flag key was not found in IntelliToggle.';
+    }
+    return message;
   }
 
   Future<void> _toggleDoubleXp(bool enabled) async {
@@ -500,6 +617,18 @@ class _HomeScreenState extends State<HomeScreen>
                 const SizedBox(height: 16),
                 _StatusGrid(state: state),
                 const SizedBox(height: 16),
+                _IntelliTogglePanel(
+                  state: state,
+                  enabled: _intelliToggleEnabled,
+                  loading: _intelliToggleLoading,
+                  evaluation: _intelliToggleEvaluation,
+                  error: _intelliToggleError,
+                  configReady: _intelliToggleService.hasCredentials,
+                  targetingKey: _intelliToggleTargetingKey,
+                  onToggleEnabled: _setIntelliToggleEnabled,
+                  onRefresh: _refreshIntelliToggle,
+                ),
+                const SizedBox(height: 16),
                 _PlatformDemoRow(
                   state: state,
                   databaseProviders: _databaseProviders,
@@ -556,6 +685,7 @@ class _GameState {
     required this.hardModeEnabled,
     required this.lightThemeEnabled,
     required this.darkThemeEnabled,
+    required this.intelliToggleBonusEnabled,
     required this.lastSavedAt,
   });
 
@@ -578,6 +708,7 @@ class _GameState {
   final bool hardModeEnabled;
   final bool lightThemeEnabled;
   final bool darkThemeEnabled;
+  final bool intelliToggleBonusEnabled;
   final DateTime? lastSavedAt;
 
   bool get bossReady => questProgress >= 100;
@@ -596,6 +727,8 @@ class _GameState {
 
   String get xpBoostLabel => doubleXpEnabled ? '2x active' : 'Standard';
 
+  String get bonusLabel => intelliToggleBonusEnabled ? 'Boosted' : 'Standard';
+
   String get themeLabel => lightThemeEnabled ? 'Light' : 'Dark';
 
   factory _GameState.fromLiveData({
@@ -608,6 +741,7 @@ class _GameState {
     required bool hardModeEnabled,
     required bool lightThemeEnabled,
     required bool darkThemeEnabled,
+    required bool intelliToggleBonusEnabled,
   }) {
     final snapshot = _flattenSnapshot(saved);
     final savedName =
@@ -670,6 +804,7 @@ class _GameState {
       hardModeEnabled: hardModeEnabled,
       lightThemeEnabled: lightThemeEnabled,
       darkThemeEnabled: darkThemeEnabled,
+      intelliToggleBonusEnabled: intelliToggleBonusEnabled,
       lastSavedAt: _dateFromMap(snapshot, const ['lastSavedAt', 'updatedAt']),
     );
   }
@@ -694,6 +829,7 @@ class _GameState {
     bool? hardModeEnabled,
     bool? lightThemeEnabled,
     bool? darkThemeEnabled,
+    bool? intelliToggleBonusEnabled,
     DateTime? lastSavedAt,
   }) {
     return _GameState(
@@ -716,6 +852,8 @@ class _GameState {
       hardModeEnabled: hardModeEnabled ?? this.hardModeEnabled,
       lightThemeEnabled: lightThemeEnabled ?? this.lightThemeEnabled,
       darkThemeEnabled: darkThemeEnabled ?? this.darkThemeEnabled,
+      intelliToggleBonusEnabled:
+          intelliToggleBonusEnabled ?? this.intelliToggleBonusEnabled,
       lastSavedAt: lastSavedAt ?? this.lastSavedAt,
     );
   }
@@ -725,8 +863,12 @@ class _GameState {
       case _GameAction.explore:
         final progressGain = hardModeEnabled ? 14 + rng.nextInt(10) : 20 + rng.nextInt(16);
         final xpGainBase = 10 + rng.nextInt(8);
-        final xpGain = xpGainBase * (doubleXpEnabled ? 2 : 1);
-        final goldGain = hardModeEnabled ? 3 + rng.nextInt(5) : 5 + rng.nextInt(6);
+        var xpGain = xpGainBase * (doubleXpEnabled ? 2 : 1);
+        var goldGain = hardModeEnabled ? 3 + rng.nextInt(5) : 5 + rng.nextInt(6);
+        if (intelliToggleBonusEnabled) {
+          xpGain += 8;
+          goldGain += 3;
+        }
         final nextProgress = (questProgress + progressGain).clamp(0, 100);
         return _withEvent(
           copyWith(
@@ -741,7 +883,7 @@ class _GameState {
             lastSavedAt: DateTime.now().toUtc(),
           ),
           'Explored',
-          '+$progressGain quest, +$xpGain XP${doubleXpEnabled ? ' (2x)' : ''}',
+          '+$progressGain quest, +$xpGain XP${doubleXpEnabled ? ' (2x)' : ''}${intelliToggleBonusEnabled ? ' + bonus' : ''}',
           Icons.explore_rounded,
         );
       case _GameAction.fight:
@@ -759,10 +901,13 @@ class _GameState {
         final damage = hardModeEnabled ? 14 + rng.nextInt(10) : 18 + rng.nextInt(15);
         final nextBoss = max(0, bossHealth - damage);
         final victory = nextBoss == 0;
+        final baseXp = victory ? (doubleXpEnabled ? 70 : 35) : (doubleXpEnabled ? 24 : 12);
+        final xpGain = baseXp + (intelliToggleBonusEnabled ? 15 : 0);
+        final goldGain = (victory ? 25 : 8) + (intelliToggleBonusEnabled ? 5 : 0);
         return _withEvent(
           copyWith(
-            xp: xp + (victory ? (doubleXpEnabled ? 70 : 35) : (doubleXpEnabled ? 24 : 12)),
-            gold: gold + (victory ? 25 : 8),
+            xp: xp + xpGain,
+            gold: gold + goldGain,
             health: max(0, health - 8),
             bossHealth: nextBoss,
             questProgress: victory ? 0 : questProgress,
@@ -773,11 +918,14 @@ class _GameState {
             lastSavedAt: DateTime.now().toUtc(),
           ),
           victory ? 'Victory' : 'Fight',
-          victory ? '+25 gold, boss defeated.' : '-$damage boss HP',
+          victory
+              ? '+$goldGain gold, boss defeated.'
+              : '-$damage boss HP${intelliToggleBonusEnabled ? ' + bonus rewards' : ''}',
           Icons.flash_on_rounded,
         );
       case _GameAction.rest:
-        final healed = hardModeEnabled ? 8 + rng.nextInt(8) : 12 + rng.nextInt(10);
+        final healed = (hardModeEnabled ? 8 + rng.nextInt(8) : 12 + rng.nextInt(10)) +
+            (intelliToggleBonusEnabled ? 4 : 0);
         return _withEvent(
           copyWith(
             health: min(maxHealth, health + healed),
@@ -785,11 +933,12 @@ class _GameState {
             lastSavedAt: DateTime.now().toUtc(),
           ),
           'Rested',
-          '+$healed health',
+          '+$healed health${intelliToggleBonusEnabled ? ' + bonus' : ''}',
           Icons.bedtime_rounded,
         );
       case _GameAction.loot:
-        final coins = hardModeEnabled ? 8 + rng.nextInt(10) : 10 + rng.nextInt(16);
+        final coins = (hardModeEnabled ? 8 + rng.nextInt(10) : 10 + rng.nextInt(16)) +
+            (intelliToggleBonusEnabled ? 6 : 0);
         return _withEvent(
           copyWith(
             gold: gold + coins,
@@ -797,7 +946,7 @@ class _GameState {
             lastSavedAt: DateTime.now().toUtc(),
           ),
           'Looted',
-          '+$coins gold',
+          '+$coins gold${intelliToggleBonusEnabled ? ' + bonus' : ''}',
           Icons.lock_open_rounded,
         );
     }
@@ -962,6 +1111,7 @@ class _StatusGrid extends StatelessWidget {
       _MiniStat(icon: Icons.savings_rounded, label: 'Gold', value: '${state.gold}'),
       _MiniStat(icon: Icons.workspace_premium_rounded, label: 'Level', value: '${state.level}'),
       _MiniStat(icon: Icons.trending_up_rounded, label: 'XP boost', value: state.xpBoostLabel),
+      _MiniStat(icon: Icons.auto_awesome_rounded, label: 'IntelliToggle', value: state.bonusLabel),
       _MiniStat(icon: Icons.sports_mma_rounded, label: 'Difficulty', value: state.difficultyLabel),
       _MiniStat(icon: Icons.palette_rounded, label: 'Theme', value: state.themeLabel),
     ];
@@ -1033,6 +1183,185 @@ class _PlatformDemoRow extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+class _IntelliTogglePanel extends StatelessWidget {
+  const _IntelliTogglePanel({
+    required this.state,
+    required this.enabled,
+    required this.loading,
+    required this.evaluation,
+    required this.error,
+    required this.configReady,
+    required this.targetingKey,
+    required this.onToggleEnabled,
+    required this.onRefresh,
+  });
+
+  final _GameState state;
+  final bool enabled;
+  final bool loading;
+  final IntelliToggleEvaluation? evaluation;
+  final String? error;
+  final bool configReady;
+  final String targetingKey;
+  final ValueChanged<bool> onToggleEnabled;
+  final VoidCallback onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    final providerState = enabled
+        ? (evaluation?.enabled == true ? 'Remote flag on' : 'Remote flag off')
+        : 'Provider paused';
+    final providerIcon = enabled
+        ? (evaluation?.enabled == true
+            ? Icons.toggle_on_rounded
+            : Icons.toggle_off_rounded)
+        : Icons.do_not_disturb_on_rounded;
+    final providerColor = enabled
+        ? (evaluation?.enabled == true
+            ? Theme.of(context).colorScheme.secondary
+            : const Color(0xFF8A97A8))
+        : const Color(0xFF8A97A8);
+
+    return _CardShell(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'IntelliToggle',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+              ),
+              if (loading)
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else
+                Icon(providerIcon, color: providerColor),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'This provider is controlled by the switch below. When it is on, the app fetches the live IntelliToggle evaluation for the configured flag key.',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: const Color(0xFFB7C6DA),
+                ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Enable IntelliToggle',
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+              ),
+              Switch(
+                value: enabled,
+                onChanged: configReady && !loading ? onToggleEnabled : null,
+              ),
+            ],
+          ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _StatusPill(
+                label: providerState,
+                icon: providerIcon,
+              ),
+              _StatusPill(
+                label: configReady ? 'Credentials ready' : 'Missing build defines',
+                icon: configReady ? Icons.verified_rounded : Icons.warning_amber_rounded,
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Targeting key: $targetingKey',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: const Color(0xFFB7C6DA),
+                      ),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: loading ? null : onRefresh,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Refresh'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (!enabled)
+            Text(
+              'Turn the provider back on to query the remote flag again.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: const Color(0xFFB7C6DA),
+                  ),
+            )
+          else if (evaluation != null)
+            Text(
+              evaluation!.enabled
+                  ? '${state.displayName} is currently in the enabled branch of ${AppConfig.intellitoggleFlagKey}.'
+                  : '${state.displayName} is currently in the disabled branch of ${AppConfig.intellitoggleFlagKey}.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: const Color(0xFFB7C6DA),
+                  ),
+            )
+          else if (error != null)
+            Text(
+              error!,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: const Color(0xFFF0B8C2),
+                  ),
+            )
+          else
+            Text(
+              'Refresh to fetch the current flag state.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: const Color(0xFFB7C6DA),
+                  ),
+            ),
+          if (evaluation != null) ...[
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _StatusPill(
+                  label: evaluation!.enabled ? 'Flag enabled' : 'Flag disabled',
+                  icon: evaluation!.enabled
+                      ? Icons.check_circle_rounded
+                      : Icons.remove_circle_outline_rounded,
+                ),
+                _StatusPill(
+                  label: 'Context: ${evaluation!.targetingKey}',
+                  icon: Icons.person_pin_circle_rounded,
+                ),
+                _StatusPill(
+                  label: 'API: live evaluate',
+                  icon: Icons.cloud_rounded,
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
     );
   }
 }
