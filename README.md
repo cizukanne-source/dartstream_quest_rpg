@@ -18,11 +18,10 @@ Firebase web API key to be provided at build time. Optional `API_*` build
 defines can override the service hosts. No API key is committed in the source
 tree.
 
-IntelliToggle is wired in as a second feature-flag provider. A dashboard switch
-lets you enable or disable the provider at runtime, and when it is on the app
-evaluates the configured remote flag key through the IntelliToggle API. The
-provider choice is persisted locally, so it survives app restarts, and the
-remote flag now grants a small RPG reward bonus when it is enabled.
+IntelliToggle is wired in as an optional OpenFeature-backed screen, matching
+the sample app pattern. After sign-in you can open the dedicated IntelliToggle
+screen, register the provider with OAuth2 client-credentials, and evaluate live
+flags against the signed-in DartStream identity.
 
 ## What the app does
 
@@ -42,7 +41,12 @@ flutter run -d chrome --web-port=3000 --dart-define=FIREBASE_API_KEY=your_web_ke
 To build the production web bundle:
 
 ```sh
-flutter build web --release --dart-define=FIREBASE_API_KEY=your_web_key_here
+flutter build web --release \
+  --dart-define=FIREBASE_API_KEY=your_web_key_here \
+  --dart-define=INTELLITOGGLE_API_URL=https://dev-api.intellitoggle.com \
+  --dart-define=INTELLITOGGLE_CLIENT_ID=client_... \
+  --dart-define=INTELLITOGGLE_CLIENT_SECRET=secret_... \
+  --dart-define=INTELLITOGGLE_TENANT_ID=tenant_...
 ```
 
 To deploy to Firebase Hosting after building:
@@ -61,23 +65,78 @@ Required / optional build defines:
 - `API_PERSISTENCE` optional override for the persistence service
 - `API_BILLING` optional override for the billing service
 - `INTELLITOGGLE_API_URL` optional override for the IntelliToggle API base URL
-- `INTELLITOGGLE_TOKEN_URL` optional override for the OAuth2 token endpoint
 - `INTELLITOGGLE_CLIENT_ID` required for IntelliToggle OAuth2
 - `INTELLITOGGLE_CLIENT_SECRET` required for IntelliToggle OAuth2
 - `INTELLITOGGLE_TENANT_ID` required for IntelliToggle OAuth2
-- `INTELLITOGGLE_PROJECT_ID` optional project identifier forwarded to requests
-- `INTELLITOGGLE_ENVIRONMENT` optional environment label, defaults to `production`
-- `INTELLITOGGLE_FLAG_KEY` required flag key the app evaluates
-- `INTELLITOGGLE_SCOPE` optional OAuth2 scope override
+- `INTELLITOGGLE_API_URL` optional, defaults to `https://dev-api.intellitoggle.com`
+- `INTELLITOGGLE_BOOL_FLAG` optional flag key for the deep-dive harness
+- `INTELLITOGGLE_STRING_FLAG` optional flag key for the deep-dive harness
+- `INTELLITOGGLE_INT_FLAG` optional flag key for the deep-dive harness
+- `INTELLITOGGLE_OBJECT_FLAG` optional flag key for the deep-dive harness
+- `INTELLITOGGLE_TARGET_USER` optional targeting key for the deep-dive harness
 
 If you do not set the service overrides, the sample uses the DartStream dev
 hosts baked into `lib/config.dart`.
 
-Example IntelliToggle build defines:
+For a Firebase preview or live Hosting deployment, make sure the web bundle was
+built with the IntelliToggle defines above. If those defines are missing, the
+dedicated IntelliToggle screen will fall back to its "not configured" state and
+the button will not be able to register the provider.
+
+### IntelliToggle integration
+
+The IntelliToggle provider uses OAuth2 client-credentials internally, so the
+Flutter app never mints a token by hand. The correct setup mirrors the sample
+app:
+
+1. Create an OAuth client in the IntelliToggle dashboard and copy the
+   `clientId`, `clientSecret`, and `tenantId`.
+2. Add those values to your local `.env` or pass them as `--dart-define`
+   values when you run Flutter.
+3. If the client was created on the IntelliToggle **dev** dashboard, override
+   the API URL with `https://dev-api.intellitoggle.com`. Otherwise the default
+   production host is `https://api.intellitoggle.com`.
+4. Launch the app with the IntelliToggle defines enabled so the dedicated
+   screen can register the provider and evaluate flags.
+
+Example run command:
 
 ```sh
-flutter run -d chrome --web-port=3000 --dart-define=FIREBASE_API_KEY=your_web_key_here --dart-define=INTELLITOGGLE_API_URL=https://dev-api.intellitoggle.com --dart-define=INTELLITOGGLE_TOKEN_URL=https://dev-api.intellitoggle.com/api/v1/oauth/token --dart-define=INTELLITOGGLE_CLIENT_ID=client_... --dart-define=INTELLITOGGLE_CLIENT_SECRET=cs_... --dart-define=INTELLITOGGLE_TENANT_ID=tenant_... --dart-define=INTELLITOGGLE_PROJECT_ID=proj_... --dart-define=INTELLITOGGLE_ENVIRONMENT=production --dart-define=INTELLITOGGLE_FLAG_KEY=your-flag-key
+flutter run -d chrome --web-port=3000 \
+  --dart-define=FIREBASE_API_KEY=your_web_key_here \
+  --dart-define=INTELLITOGGLE_API_URL=https://dev-api.intellitoggle.com \
+  --dart-define=INTELLITOGGLE_CLIENT_ID=client_... \
+  --dart-define=INTELLITOGGLE_CLIENT_SECRET=secret_... \
+  --dart-define=INTELLITOGGLE_TENANT_ID=tenant_...
 ```
+
+If you are using a production IntelliToggle tenant, pass the production host
+explicitly with `--dart-define=INTELLITOGGLE_API_URL=https://api.intellitoggle.com`.
+
+### IntelliToggle deep-dive
+
+The quest repo now includes the same OpenFeature-based deep-dive harness as the
+sample app:
+
+```cmd
+dart run bin\intellitoggle_deepdive.dart
+```
+
+It reads these environment variables from `.env` or your shell:
+
+- `INTELLITOGGLE_CLIENT_ID`
+- `INTELLITOGGLE_CLIENT_SECRET`
+- `INTELLITOGGLE_TENANT_ID`
+- `INTELLITOGGLE_API_URL` optional, defaults to `https://api.intellitoggle.com`
+- `INTELLITOGGLE_BOOL_FLAG` optional, defaults to `new-dashboard`
+- `INTELLITOGGLE_STRING_FLAG` optional, defaults to `hero-variant`
+- `INTELLITOGGLE_INT_FLAG` optional, defaults to `max-items`
+- `INTELLITOGGLE_OBJECT_FLAG` optional, defaults to `theme-config`
+- `INTELLITOGGLE_TARGET_USER` optional, defaults to `deepdive-cli`
+
+Like the sample, the harness registers the provider, verifies `READY`, evaluates
+boolean/string/integer/object flags through OpenFeature, and confirms a bad
+secret fails closed.
 
 ## OAuth2 / machine-to-machine
 
@@ -145,17 +204,15 @@ Then the deploy workflow can publish the web bundle to the hosting site and
 create preview URLs automatically for feature branches / pull requests.
 
 The GitHub Actions deploy job also expects these secrets so the hosted build
-gets the same IntelliToggle configuration as local runs:
+gets the same IntelliToggle configuration as local runs. If any of them are
+missing, the deployment now fails instead of publishing a bundle that only
+shows the IntelliToggle "not configured" screen:
 
 - `INTELLITOGGLE_API_URL`
-- `INTELLITOGGLE_TOKEN_URL`
 - `INTELLITOGGLE_CLIENT_ID`
 - `INTELLITOGGLE_CLIENT_SECRET`
 - `INTELLITOGGLE_TENANT_ID`
-- `INTELLITOGGLE_PROJECT_ID`
-- `INTELLITOGGLE_ENVIRONMENT`
-- `INTELLITOGGLE_FLAG_KEY`
-- `INTELLITOGGLE_SCOPE`
+- `FIREBASE_WEB_API_KEY`
 
 ## Project structure
 
@@ -163,6 +220,7 @@ gets the same IntelliToggle configuration as local runs:
 - `lib/state/session.dart` - authentication and tenant state
 - `lib/screens/login_screen.dart` - create-account / sign-in UI
 - `lib/screens/home_screen.dart` - live RPG dashboard and backend panels
+- `bin/intellitoggle_deepdive.dart` - IntelliToggle OpenFeature deep-dive
 
 ## Why this repo exists
 

@@ -32,6 +32,8 @@ dependencies:
     sdk: flutter
   dartstream_client: ^0.0.1
   http: ^1.2.2
+  openfeature_dart_server_sdk: ^0.0.22
+  openfeature_provider_intellitoggle: ^0.0.9
   shared_preferences: ^2.3.2
 
   # The following adds the Cupertino Icons font to your application.

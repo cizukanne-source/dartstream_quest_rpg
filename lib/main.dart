@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
+import 'screens/shell_screen.dart';
 import 'state/session.dart';
 
 Future<void> main() async {
@@ -47,7 +47,7 @@ class _DartStreamQuestAppState extends State<DartStreamQuestApp> {
       darkTheme: _buildTheme(Brightness.dark),
       themeMode: _session.themeMode,
       home: _session.status == SessionStatus.signedIn
-          ? HomeScreen(session: _session)
+          ? ShellScreen(session: _session)
           : LoginScreen(session: _session),
     );
   }

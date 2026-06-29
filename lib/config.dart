@@ -1,6 +1,6 @@
 import 'package:dartstream_client/dartstream_client.dart';
 
-/// Hosts and Firebase config for the DartStream sample environment.
+/// Hosts and Firebase config for the DartStream Quest RPG.
 ///
 /// The app uses Firebase Identity Toolkit for the user-facing sign-up / sign-in
 /// step and then bootstraps a DartStream session for tenant-aware access.
@@ -17,16 +17,6 @@ class AppConfig {
   static const _defaultPersistenceHost =
       'https://dev-apipersistence.dartstream.io';
   static const _defaultBillingHost = 'https://dev-apibilling.dartstream.io';
-  static const _defaultIntelliToggleApiUrl =
-      'https://dev-api.intellitoggle.com';
-  static const _defaultIntelliToggleTokenUrl =
-      'https://dev-api.intellitoggle.com/api/v1/oauth/token';
-  static const _defaultIntelliToggleClientId = '';
-  static const _defaultIntelliToggleClientSecret = '';
-  static const _defaultIntelliToggleTenantId = '';
-  static const _defaultIntelliToggleProjectId = '';
-  static const _defaultIntelliToggleEnvironment = 'production';
-  static const _defaultIntelliToggleFlagKey = 'your-flag-key';
 
   static String get firebaseApiKey {
     final buildTimeKey = const String.fromEnvironment('FIREBASE_API_KEY').trim();
@@ -65,66 +55,38 @@ class AppConfig {
     return override.isNotEmpty ? override : _defaultBillingHost;
   }
 
-  static String get intellitoggleApiUrl {
+  // ---- IntelliToggle (Aortem feature-flag SaaS, via OpenFeature) ----------
+  //
+  // The IntelliToggle OpenFeature provider authenticates with OAuth2
+  // client-credentials. These are injected at build time, never committed:
+  //   flutter run -d chrome --web-port=3000 \
+  //     --dart-define=FIREBASE_API_KEY=YOUR_KEY \
+  //     --dart-define=INTELLITOGGLE_CLIENT_ID=... \
+  //     --dart-define=INTELLITOGGLE_CLIENT_SECRET=... \
+  //     --dart-define=INTELLITOGGLE_TENANT_ID=...
+  // The secret is confidential - supplying it to a web bundle is only safe for
+  // a demo/sandbox tenant; production keeps client-credentials server-side.
+  static const intelliToggleClientId =
+      String.fromEnvironment('INTELLITOGGLE_CLIENT_ID');
+  static const intelliToggleClientSecret =
+      String.fromEnvironment('INTELLITOGGLE_CLIENT_SECRET');
+  static const intelliToggleTenantId =
+      String.fromEnvironment('INTELLITOGGLE_TENANT_ID');
+
+  /// Optional API host override; defaults to IntelliToggle production.
+  static String get intelliToggleApiUrl {
     final override = const String.fromEnvironment('INTELLITOGGLE_API_URL').trim();
-    return override.isNotEmpty ? override : _defaultIntelliToggleApiUrl;
-  }
-
-  static String get intellitoggleTokenUrl {
-    final override =
-        const String.fromEnvironment('INTELLITOGGLE_TOKEN_URL').trim();
-    return override.isNotEmpty ? override : _defaultIntelliToggleTokenUrl;
-  }
-
-  static String get intellitoggleClientId {
-    final override =
-        const String.fromEnvironment('INTELLITOGGLE_CLIENT_ID').trim();
-    return override.isNotEmpty ? override : _defaultIntelliToggleClientId;
-  }
-
-  static String get intellitoggleClientSecret {
-    final override =
-        const String.fromEnvironment('INTELLITOGGLE_CLIENT_SECRET').trim();
-    return override.isNotEmpty ? override : _defaultIntelliToggleClientSecret;
-  }
-
-  static String get intellitoggleTenantId {
-    final override =
-        const String.fromEnvironment('INTELLITOGGLE_TENANT_ID').trim();
-    return override.isNotEmpty ? override : _defaultIntelliToggleTenantId;
-  }
-
-  static String get intellitoggleProjectId {
-    final override =
-        const String.fromEnvironment('INTELLITOGGLE_PROJECT_ID').trim();
-    return override.isNotEmpty ? override : _defaultIntelliToggleProjectId;
-  }
-
-  static String get intellitoggleEnvironment {
-    final override =
-        const String.fromEnvironment('INTELLITOGGLE_ENVIRONMENT').trim();
-    return override.isNotEmpty ? override : _defaultIntelliToggleEnvironment;
-  }
-
-  static String get intellitoggleFlagKey {
-    final override =
-        const String.fromEnvironment('INTELLITOGGLE_FLAG_KEY').trim();
-    return override.isNotEmpty ? override : _defaultIntelliToggleFlagKey;
-  }
-
-  static String get intellitoggleScope {
-    final override =
-        const String.fromEnvironment('INTELLITOGGLE_SCOPE').trim();
     return override.isNotEmpty
         ? override
-        : 'flags:read flags:evaluate projects:read flags:write projects:write';
+        : 'https://dev-api.intellitoggle.com';
   }
 
-  static bool get hasIntelliToggleConfig =>
-      intellitoggleClientId.isNotEmpty &&
-      intellitoggleClientSecret.isNotEmpty &&
-      intellitoggleTenantId.isNotEmpty &&
-      intellitoggleFlagKey.isNotEmpty;
+  /// Whether the IntelliToggle client-credentials were injected; the dedicated
+  /// IntelliToggle screen surfaces this and explains how to supply them.
+  static bool get hasIntelliToggle =>
+      intelliToggleClientId.isNotEmpty &&
+      intelliToggleClientSecret.isNotEmpty &&
+      intelliToggleTenantId.isNotEmpty;
 
   static DartStreamConfig get dartStreamConfig => DartStreamConfig.dev(
         firebaseApiKey: firebaseApiKey.isEmpty ? null : firebaseApiKey,
