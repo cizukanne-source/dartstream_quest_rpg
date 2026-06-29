@@ -26,7 +26,29 @@ jobs:
         run: flutter pub get
 
       - name: Build web
-        run: flutter build web --release --dart-define=FIREBASE_API_KEY=${{ secrets.FIREBASE_WEB_API_KEY }}
+        env:
+          FIREBASE_WEB_API_KEY: ${{ secrets.FIREBASE_WEB_API_KEY }}
+          INTELLITOGGLE_API_URL: ${{ secrets.INTELLITOGGLE_API_URL }}
+          INTELLITOGGLE_TOKEN_URL: ${{ secrets.INTELLITOGGLE_TOKEN_URL }}
+          INTELLITOGGLE_CLIENT_ID: ${{ secrets.INTELLITOGGLE_CLIENT_ID }}
+          INTELLITOGGLE_CLIENT_SECRET: ${{ secrets.INTELLITOGGLE_CLIENT_SECRET }}
+          INTELLITOGGLE_TENANT_ID: ${{ secrets.INTELLITOGGLE_TENANT_ID }}
+          INTELLITOGGLE_PROJECT_ID: ${{ secrets.INTELLITOGGLE_PROJECT_ID }}
+          INTELLITOGGLE_ENVIRONMENT: ${{ secrets.INTELLITOGGLE_ENVIRONMENT }}
+          INTELLITOGGLE_FLAG_KEY: ${{ secrets.INTELLITOGGLE_FLAG_KEY }}
+          INTELLITOGGLE_SCOPE: ${{ secrets.INTELLITOGGLE_SCOPE }}
+        run: >
+          flutter build web --release
+          --dart-define=FIREBASE_API_KEY=${{ secrets.FIREBASE_WEB_API_KEY }}
+          --dart-define=INTELLITOGGLE_API_URL=${{ secrets.INTELLITOGGLE_API_URL }}
+          --dart-define=INTELLITOGGLE_TOKEN_URL=${{ secrets.INTELLITOGGLE_TOKEN_URL }}
+          --dart-define=INTELLITOGGLE_CLIENT_ID=${{ secrets.INTELLITOGGLE_CLIENT_ID }}
+          --dart-define=INTELLITOGGLE_CLIENT_SECRET=${{ secrets.INTELLITOGGLE_CLIENT_SECRET }}
+          --dart-define=INTELLITOGGLE_TENANT_ID=${{ secrets.INTELLITOGGLE_TENANT_ID }}
+          --dart-define=INTELLITOGGLE_PROJECT_ID=${{ secrets.INTELLITOGGLE_PROJECT_ID }}
+          --dart-define=INTELLITOGGLE_ENVIRONMENT=${{ secrets.INTELLITOGGLE_ENVIRONMENT }}
+          --dart-define=INTELLITOGGLE_FLAG_KEY=${{ secrets.INTELLITOGGLE_FLAG_KEY }}
+          --dart-define=INTELLITOGGLE_SCOPE=${{ secrets.INTELLITOGGLE_SCOPE }}
 
       - name: Deploy preview to Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0
@@ -55,7 +77,29 @@ jobs:
         run: flutter pub get
 
       - name: Build web
-        run: flutter build web --release --dart-define=FIREBASE_API_KEY=${{ secrets.FIREBASE_WEB_API_KEY }}
+        env:
+          FIREBASE_WEB_API_KEY: ${{ secrets.FIREBASE_WEB_API_KEY }}
+          INTELLITOGGLE_API_URL: ${{ secrets.INTELLITOGGLE_API_URL }}
+          INTELLITOGGLE_TOKEN_URL: ${{ secrets.INTELLITOGGLE_TOKEN_URL }}
+          INTELLITOGGLE_CLIENT_ID: ${{ secrets.INTELLITOGGLE_CLIENT_ID }}
+          INTELLITOGGLE_CLIENT_SECRET: ${{ secrets.INTELLITOGGLE_CLIENT_SECRET }}
+          INTELLITOGGLE_TENANT_ID: ${{ secrets.INTELLITOGGLE_TENANT_ID }}
+          INTELLITOGGLE_PROJECT_ID: ${{ secrets.INTELLITOGGLE_PROJECT_ID }}
+          INTELLITOGGLE_ENVIRONMENT: ${{ secrets.INTELLITOGGLE_ENVIRONMENT }}
+          INTELLITOGGLE_FLAG_KEY: ${{ secrets.INTELLITOGGLE_FLAG_KEY }}
+          INTELLITOGGLE_SCOPE: ${{ secrets.INTELLITOGGLE_SCOPE }}
+        run: >
+          flutter build web --release
+          --dart-define=FIREBASE_API_KEY=${{ secrets.FIREBASE_WEB_API_KEY }}
+          --dart-define=INTELLITOGGLE_API_URL=${{ secrets.INTELLITOGGLE_API_URL }}
+          --dart-define=INTELLITOGGLE_TOKEN_URL=${{ secrets.INTELLITOGGLE_TOKEN_URL }}
+          --dart-define=INTELLITOGGLE_CLIENT_ID=${{ secrets.INTELLITOGGLE_CLIENT_ID }}
+          --dart-define=INTELLITOGGLE_CLIENT_SECRET=${{ secrets.INTELLITOGGLE_CLIENT_SECRET }}
+          --dart-define=INTELLITOGGLE_TENANT_ID=${{ secrets.INTELLITOGGLE_TENANT_ID }}
+          --dart-define=INTELLITOGGLE_PROJECT_ID=${{ secrets.INTELLITOGGLE_PROJECT_ID }}
+          --dart-define=INTELLITOGGLE_ENVIRONMENT=${{ secrets.INTELLITOGGLE_ENVIRONMENT }}
+          --dart-define=INTELLITOGGLE_FLAG_KEY=${{ secrets.INTELLITOGGLE_FLAG_KEY }}
+          --dart-define=INTELLITOGGLE_SCOPE=${{ secrets.INTELLITOGGLE_SCOPE }}
 
       - name: Deploy live to Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0

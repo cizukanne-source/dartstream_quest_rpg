@@ -144,6 +144,19 @@ For GitHub Actions deployment, add these secrets:
 Then the deploy workflow can publish the web bundle to the hosting site and
 create preview URLs automatically for feature branches / pull requests.
 
+The GitHub Actions deploy job also expects these secrets so the hosted build
+gets the same IntelliToggle configuration as local runs:
+
+- `INTELLITOGGLE_API_URL`
+- `INTELLITOGGLE_TOKEN_URL`
+- `INTELLITOGGLE_CLIENT_ID`
+- `INTELLITOGGLE_CLIENT_SECRET`
+- `INTELLITOGGLE_TENANT_ID`
+- `INTELLITOGGLE_PROJECT_ID`
+- `INTELLITOGGLE_ENVIRONMENT`
+- `INTELLITOGGLE_FLAG_KEY`
+- `INTELLITOGGLE_SCOPE`
+
 ## Project structure
 
 - `lib/config.dart` - backend host configuration and Firebase API key lookup
