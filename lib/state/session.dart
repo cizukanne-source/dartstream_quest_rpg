@@ -1,5 +1,8 @@
+import 'dart:convert';
+
 import 'package:dartstream_client/dartstream_client.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
 import '../config.dart';
 
@@ -9,6 +12,7 @@ class Session extends ChangeNotifier {
   SessionStatus status = SessionStatus.signedOut;
   String? email;
   String? displayName;
+  String? photoUrl;
   String? userId;
   String? tenantId;
   String? errorMessage;
@@ -78,6 +82,7 @@ class Session extends ChangeNotifier {
       this.connection = connection;
       this.email = connection.session.email;
       this.displayName = displayName;
+      photoUrl = _stringFromMap(connection.session.raw, const ['photoUrl', 'photo_url']);
       userId = connection.session.userId;
       tenantId = connection.session.tenantId;
       bootstrap = connection.session.raw;
@@ -121,6 +126,7 @@ class Session extends ChangeNotifier {
     status = SessionStatus.signedOut;
     email = null;
     displayName = null;
+    photoUrl = null;
     userId = null;
     tenantId = null;
     errorMessage = null;
@@ -138,6 +144,72 @@ class Session extends ChangeNotifier {
   void updateFeatureFlags(List<dynamic> flags) {
     featureFlags = List<dynamic>.unmodifiable(flags);
     notifyListeners();
+  }
+
+  Future<void> refreshProfile() async {
+    final currentClient = client;
+    final currentSession = sdkSession;
+    if (currentClient == null || currentSession == null) {
+      return;
+    }
+    final profile = await currentClient.auth.getUser(currentSession);
+    displayName = _stringFromMap(profile, const ['displayName', 'display_name', 'name']) ?? displayName;
+    photoUrl = _stringFromMap(profile, const ['photoUrl', 'photo_url']);
+    bootstrap = profile;
+    notifyListeners();
+  }
+
+  Future<void> updateDisplayName(String newDisplayName) async {
+    final currentClient = client;
+    final currentSession = sdkSession;
+    if (currentClient == null || currentSession == null) {
+      return;
+    }
+    await currentClient.auth.updateUser(
+      currentSession,
+      displayName: newDisplayName,
+    );
+    displayName = newDisplayName;
+    notifyListeners();
+  }
+
+  Future<void> updatePhotoUrl(String? newPhotoUrl) async {
+    final currentClient = client;
+    final currentSession = sdkSession;
+    if (currentClient == null || currentSession == null) {
+      return;
+    }
+    await currentClient.auth.updateUser(
+      currentSession,
+      photoUrl: newPhotoUrl == null || newPhotoUrl.isEmpty ? null : newPhotoUrl,
+      clearPhotoUrl: newPhotoUrl == null || newPhotoUrl.isEmpty,
+    );
+    photoUrl = newPhotoUrl == null || newPhotoUrl.isEmpty ? null : newPhotoUrl;
+    notifyListeners();
+  }
+
+  Future<void> changePassword(String newPassword) async {
+    final currentSession = sdkSession;
+    final key = AppConfig.firebaseApiKey;
+    if (currentSession == null || key.isEmpty) {
+      throw StateError('Firebase API key is required to change the password.');
+    }
+    final response = await http.post(
+      Uri.https('identitytoolkit.googleapis.com', '/v1/accounts:update', {'key': key}),
+      headers: const {'content-type': 'application/json'},
+      body: jsonEncode({
+        'idToken': currentSession.idToken,
+        'password': newPassword,
+        'returnSecureToken': true,
+      }),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw DartStreamFirebaseAuthException(
+        'Failed to update password.',
+        statusCode: response.statusCode,
+        body: response.body,
+      );
+    }
   }
 
   bool hasFeatureFlag(String key) {
@@ -212,5 +284,15 @@ class Session extends ChangeNotifier {
       }
     }
     return false;
+  }
+
+  String? _stringFromMap(Map<String, dynamic> map, List<String> keys) {
+    for (final key in keys) {
+      final value = map[key];
+      if (value is String && value.trim().isNotEmpty) {
+        return value.trim();
+      }
+    }
+    return null;
   }
 }
