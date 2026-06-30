@@ -68,7 +68,7 @@ Required / optional build defines:
 - `INTELLITOGGLE_CLIENT_ID` required for IntelliToggle OAuth2
 - `INTELLITOGGLE_CLIENT_SECRET` required for IntelliToggle OAuth2
 - `INTELLITOGGLE_TENANT_ID` required for IntelliToggle OAuth2
-- `INTELLITOGGLE_API_URL` optional, defaults to `https://dev-api.intellitoggle.com`
+- `INTELLITOGGLE_API_URL` optional, defaults to `https://api.intellitoggle.com`
 - `INTELLITOGGLE_BOOL_FLAG` optional flag key for the deep-dive harness
 - `INTELLITOGGLE_STRING_FLAG` optional flag key for the deep-dive harness
 - `INTELLITOGGLE_INT_FLAG` optional flag key for the deep-dive harness

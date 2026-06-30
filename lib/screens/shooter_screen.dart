@@ -22,6 +22,7 @@ class _ShooterScreenState extends State<ShooterScreen>
 
   Duration _lastElapsed = Duration.zero;
   Size _arenaSize = Size.zero;
+  Offset _aimPosition = Offset.zero;
 
   final List<_Target> _targets = [];
   final List<_Impact> _impacts = [];
@@ -45,6 +46,44 @@ class _ShooterScreenState extends State<ShooterScreen>
       _session.displayName ??
       _session.email?.split('@').first ??
       'Operator';
+
+  Offset _defaultAimPosition(Size size) => Offset(size.width / 2, size.height / 2);
+
+  Offset _clampAimPosition(Offset position) {
+    if (_arenaSize == Size.zero) {
+      return position;
+    }
+    const padding = 46.0;
+    return Offset(
+      position.dx.clamp(padding, _arenaSize.width - padding),
+      position.dy.clamp(padding, _arenaSize.height - padding),
+    );
+  }
+
+  Offset get _currentAimPosition {
+    if (_arenaSize == Size.zero) {
+      return _aimPosition;
+    }
+    if (_aimPosition == Offset.zero) {
+      return _defaultAimPosition(_arenaSize);
+    }
+    return _clampAimPosition(_aimPosition);
+  }
+
+  void _setAimPosition(Offset position, {bool repaint = true}) {
+    _aimPosition = _clampAimPosition(position);
+    if (repaint && mounted) {
+      setState(() {});
+    }
+  }
+
+  void _moveAimBy(Offset delta) {
+    _setAimPosition(_currentAimPosition + delta);
+  }
+
+  void _moveAimTo(Offset position) {
+    _setAimPosition(position);
+  }
 
   @override
   void initState() {
@@ -192,6 +231,7 @@ class _ShooterScreenState extends State<ShooterScreen>
       _banner = null;
       _targets.clear();
       _impacts.clear();
+      _aimPosition = Offset.zero;
       _lastElapsed = Duration.zero;
     });
   }
@@ -254,6 +294,10 @@ class _ShooterScreenState extends State<ShooterScreen>
     }
   }
 
+  void _fireAtAim() {
+    _fireAt(_currentAimPosition);
+  }
+
   @override
   Widget build(BuildContext context) {
     final wide = MediaQuery.sizeOf(context).width >= 980;
@@ -307,7 +351,7 @@ class _ShooterScreenState extends State<ShooterScreen>
                             children: [
                               Expanded(flex: 7, child: arena),
                               const SizedBox(height: 16),
-                              SizedBox(height: 240, child: sidePanel),
+                              Expanded(flex: 4, child: sidePanel),
                             ],
                           ),
                   ),
@@ -385,6 +429,7 @@ class _ShooterScreenState extends State<ShooterScreen>
     List<_RenderedTarget> targets,
   ) {
     final theme = Theme.of(context);
+    final aimPosition = _currentAimPosition;
 
     return Container(
       decoration: BoxDecoration(
@@ -401,7 +446,12 @@ class _ShooterScreenState extends State<ShooterScreen>
       clipBehavior: Clip.antiAlias,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTapDown: (details) => _fireAt(details.localPosition),
+        onTapDown: (details) {
+          _moveAimTo(details.localPosition);
+          _fireAt(details.localPosition);
+        },
+        onPanStart: (details) => _moveAimTo(details.localPosition),
+        onPanUpdate: (details) => _moveAimBy(details.delta),
         child: Stack(
           children: [
             Positioned.fill(
@@ -451,26 +501,11 @@ class _ShooterScreenState extends State<ShooterScreen>
                 child: _buildBanner(),
               ),
             ),
-            Align(
-              alignment: Alignment.bottomLeft,
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: _buildWeaponPanel(context),
-              ),
-            ),
-            Align(
-              alignment: Alignment.bottomRight,
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: _buildActionStack(),
-              ),
-            ),
-            const Align(
-              alignment: Alignment.center,
-              child: IgnorePointer(
-                child: _Crosshair(
-                  color: Color(0xFF6EE7F9),
-                ),
+            Positioned(
+              left: aimPosition.dx - 46,
+              top: aimPosition.dy - 46,
+              child: const _Crosshair(
+                color: Color(0xFF6EE7F9),
               ),
             ),
             if (_gameOver)
@@ -552,83 +587,6 @@ class _ShooterScreenState extends State<ShooterScreen>
     );
   }
 
-  Widget _buildWeaponPanel(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      width: 220,
-      decoration: BoxDecoration(
-        color: const Color(0xFF07111C).withOpacity(0.82),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withOpacity(0.08)),
-      ),
-      padding: const EdgeInsets.all(14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            'Weapon HUD',
-            style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 10),
-          _ProgressLine(
-            label: 'Health',
-            value: _health / 100,
-            color: const Color(0xFF34D399),
-            rightText: '${_health.toInt()}%',
-          ),
-          const SizedBox(height: 10),
-          _ProgressLine(
-            label: 'Ammo',
-            value: _ammo / 12,
-            color: const Color(0xFFFFA24A),
-            rightText: '$_ammo / 12',
-          ),
-          const SizedBox(height: 10),
-          _ProgressLine(
-            label: 'Reserve',
-            value: _reserveAmmo / 72,
-            color: const Color(0xFF6EE7F9),
-            rightText: '$_reserveAmmo',
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActionStack() {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        _HudButton(
-          icon: _paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
-          label: _paused ? 'Resume' : 'Pause',
-          onPressed: _togglePause,
-        ),
-        const SizedBox(height: 10),
-        _HudButton(
-          icon: Icons.restart_alt_rounded,
-          label: 'Restart',
-          onPressed: _restartMission,
-        ),
-        const SizedBox(height: 10),
-        FilledButton.icon(
-          onPressed: () => _fireAt(
-            _arenaSize == Size.zero
-                ? Offset.zero
-                : Offset(_arenaSize.width / 2, _arenaSize.height / 2),
-          ),
-          icon: const Icon(Icons.gps_fixed_rounded),
-          label: const Text('Fire'),
-          style: FilledButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-          ),
-        ),
-      ],
-    );
-  }
-
   Widget _buildSidePanel(BuildContext context, Color subtitleColor) {
     final theme = Theme.of(context);
     return Container(
@@ -638,57 +596,143 @@ class _ShooterScreenState extends State<ShooterScreen>
         border: Border.all(color: Colors.white.withOpacity(0.08)),
       ),
       padding: const EdgeInsets.all(18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'Mission brief',
-            style: theme.textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w900,
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Mission brief',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w900,
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Track moving targets in a neon strike corridor and keep the line from collapsing.',
-            style: theme.textTheme.bodyMedium?.copyWith(color: subtitleColor),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: _StatCard(
-                  label: 'Score',
-                  value: '$_score',
-                  icon: Icons.emoji_events_rounded,
+            const SizedBox(height: 8),
+            Text(
+              'Track moving targets in a neon strike corridor and keep the line from collapsing.',
+              style: theme.textTheme.bodyMedium?.copyWith(color: subtitleColor),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: _StatCard(
+                    label: 'Score',
+                    value: '$_score',
+                    icon: Icons.emoji_events_rounded,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _StatCard(
-                  label: 'Combo',
-                  value: 'x$_combo',
-                  icon: Icons.bolt_rounded,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _StatCard(
+                    label: 'Combo',
+                    value: 'x$_combo',
+                    icon: Icons.bolt_rounded,
+                  ),
                 ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _StatCard(
+              label: 'Status',
+              value: _gameOver
+                  ? 'Down'
+                  : _paused
+                      ? 'Paused'
+                      : 'Engaged',
+              icon: _gameOver
+                  ? Icons.warning_amber_rounded
+                  : _paused
+                      ? Icons.pause_circle_rounded
+                      : Icons.track_changes_rounded,
+            ),
+            const SizedBox(height: 16),
+            Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20),
+                color: const Color(0xFF07111C).withOpacity(0.7),
+                border: Border.all(color: Colors.white.withOpacity(0.06)),
               ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _StatCard(
-            label: 'Status',
-            value: _gameOver
-                ? 'Down'
-                : _paused
-                    ? 'Paused'
-                    : 'Engaged',
-            icon: _gameOver
-                ? Icons.warning_amber_rounded
-                : _paused
-                    ? Icons.pause_circle_rounded
-                    : Icons.track_changes_rounded,
-          ),
-          const SizedBox(height: 16),
-          Expanded(
-            child: Container(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Weapon HUD',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  _ProgressLine(
+                    label: 'Health',
+                    value: _health / 100,
+                    color: const Color(0xFF34D399),
+                    rightText: '${_health.toInt()}%',
+                  ),
+                  const SizedBox(height: 10),
+                  _ProgressLine(
+                    label: 'Ammo',
+                    value: _ammo / 12,
+                    color: const Color(0xFFFFA24A),
+                    rightText: '$_ammo / 12',
+                  ),
+                  const SizedBox(height: 10),
+                  _ProgressLine(
+                    label: 'Reserve',
+                    value: _reserveAmmo / 72,
+                    color: const Color(0xFF6EE7F9),
+                    rightText: '$_reserveAmmo',
+                  ),
+                  const SizedBox(height: 16),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final compact = constraints.maxWidth < 360;
+                      final pauseButton = _HudButton(
+                        icon: _paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
+                        label: _paused ? 'Resume' : 'Pause',
+                        onPressed: _togglePause,
+                      );
+                      final restartButton = _HudButton(
+                        icon: Icons.restart_alt_rounded,
+                        label: 'Restart',
+                        onPressed: _restartMission,
+                      );
+                      final fireButton = FilledButton.icon(
+                        onPressed: _fireAtAim,
+                        icon: const Icon(Icons.gps_fixed_rounded),
+                        label: const Text('Fire'),
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+                        ),
+                      );
+
+                      if (compact) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            pauseButton,
+                            const SizedBox(height: 10),
+                            restartButton,
+                            const SizedBox(height: 10),
+                            fireButton,
+                          ],
+                        );
+                      }
+
+                      return Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        alignment: WrapAlignment.spaceBetween,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [pauseButton, restartButton, fireButton],
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(20),
                 color: const Color(0xFF07111C).withOpacity(0.7),
@@ -725,8 +769,8 @@ class _ShooterScreenState extends State<ShooterScreen>
                 ],
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

@@ -32,6 +32,7 @@ dependencies:
     sdk: flutter
   dartstream_client: ^0.0.1
   http: ^1.2.2
+  image_picker: ^1.2.1
   openfeature_dart_server_sdk: ^0.0.22
   openfeature_provider_intellitoggle: ^0.0.9
   shared_preferences: ^2.3.2

@@ -78,7 +78,7 @@ class AppConfig {
     final override = const String.fromEnvironment('INTELLITOGGLE_API_URL').trim();
     return override.isNotEmpty
         ? override
-        : 'https://dev-api.intellitoggle.com';
+        : 'https://api.intellitoggle.com';
   }
 
   /// Whether the IntelliToggle client-credentials were injected; the dedicated

@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'dart:convert';
 
 import 'package:dartstream_client/dartstream_client.dart';
@@ -13,6 +14,7 @@ class Session extends ChangeNotifier {
   String? email;
   String? displayName;
   String? photoUrl;
+  Uint8List? avatarBytes;
   String? userId;
   String? tenantId;
   String? errorMessage;
@@ -83,6 +85,7 @@ class Session extends ChangeNotifier {
       this.email = connection.session.email;
       this.displayName = displayName;
       photoUrl = _stringFromMap(connection.session.raw, const ['photoUrl', 'photo_url']);
+      avatarBytes = null;
       userId = connection.session.userId;
       tenantId = connection.session.tenantId;
       bootstrap = connection.session.raw;
@@ -127,6 +130,7 @@ class Session extends ChangeNotifier {
     email = null;
     displayName = null;
     photoUrl = null;
+    avatarBytes = null;
     userId = null;
     tenantId = null;
     errorMessage = null;
@@ -152,9 +156,14 @@ class Session extends ChangeNotifier {
     if (currentClient == null || currentSession == null) {
       return;
     }
-    final profile = await currentClient.auth.getUser(currentSession);
+    final results = await Future.wait([
+      currentClient.auth.getUser(currentSession),
+      currentClient.auth.avatarBytes(currentSession),
+    ]);
+    final profile = results[0] as Map<String, dynamic>;
     displayName = _stringFromMap(profile, const ['displayName', 'display_name', 'name']) ?? displayName;
     photoUrl = _stringFromMap(profile, const ['photoUrl', 'photo_url']);
+    avatarBytes = results[1] as Uint8List?;
     bootstrap = profile;
     notifyListeners();
   }
@@ -185,6 +194,32 @@ class Session extends ChangeNotifier {
       clearPhotoUrl: newPhotoUrl == null || newPhotoUrl.isEmpty,
     );
     photoUrl = newPhotoUrl == null || newPhotoUrl.isEmpty ? null : newPhotoUrl;
+    notifyListeners();
+  }
+
+  Future<void> uploadAvatar(Uint8List bytes, {required String contentType}) async {
+    final currentClient = client;
+    final currentSession = sdkSession;
+    if (currentClient == null || currentSession == null) {
+      return;
+    }
+    await currentClient.auth.uploadAvatar(
+      currentSession,
+      image: base64Encode(bytes),
+      contentType: contentType,
+    );
+    avatarBytes = bytes;
+    notifyListeners();
+  }
+
+  Future<void> deleteAvatar() async {
+    final currentClient = client;
+    final currentSession = sdkSession;
+    if (currentClient == null || currentSession == null) {
+      return;
+    }
+    await currentClient.auth.deleteAvatar(currentSession);
+    avatarBytes = null;
     notifyListeners();
   }
 
