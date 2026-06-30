@@ -1,7 +1,12 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 import '../config.dart';
 import '../state/session.dart';
+import '../widgets/google_sign_in_button.dart';
 
 enum AuthMode { signUp, signIn }
 
@@ -15,17 +20,57 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  final GoogleSignIn _googleSignIn = GoogleSignIn.instance;
   final _email = TextEditingController();
   final _password = TextEditingController();
   final _confirm = TextEditingController();
-  final _displayName = TextEditingController(text: 'Nova Runner');
-
+  final _displayName = TextEditingController();
+  StreamSubscription<GoogleSignInAuthenticationEvent>? _googleAuthSubscription;
 
   AuthMode _mode = AuthMode.signUp;
   String? _localError;
+  String? _googleInitError;
+  bool _googleBusy = false;
+  bool _googleReady = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_initializeGoogleSignIn());
+  }
+
+  Future<void> _initializeGoogleSignIn() async {
+    try {
+      await _googleSignIn.initialize(
+        clientId: AppConfig.googleClientId.isEmpty ? null : AppConfig.googleClientId,
+      );
+      _googleAuthSubscription = _googleSignIn.authenticationEvents.listen(
+        _handleGoogleAuthenticationEvent,
+        onError: _handleGoogleAuthenticationError,
+      );
+      if (kIsWeb) {
+        _googleSignIn.attemptLightweightAuthentication();
+      }
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _googleReady = true;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _googleReady = false;
+        _googleInitError = _googleErrorMessage(error);
+      });
+    }
+  }
 
   @override
   void dispose() {
+    unawaited(_googleAuthSubscription?.cancel());
     _email.dispose();
     _password.dispose();
     _confirm.dispose();
@@ -42,6 +87,84 @@ class _LoginScreenState extends State<LoginScreen> {
     });
   }
 
+  Future<void> _handleGoogleAuthenticationEvent(
+    GoogleSignInAuthenticationEvent event,
+  ) async {
+    if (!mounted || !kIsWeb) {
+      return;
+    }
+
+    switch (event) {
+      case GoogleSignInAuthenticationEventSignIn(user: final user):
+        await _completeGoogleSignIn(user);
+      case GoogleSignInAuthenticationEventSignOut():
+        break;
+    }
+  }
+
+  Future<void> _handleGoogleAuthenticationError(Object error) async {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _googleBusy = false;
+      _googleInitError = _googleErrorMessage(error);
+    });
+  }
+
+  Future<void> _startGoogleSignIn() async {
+    if (_googleBusy || widget.session.status == SessionStatus.signingIn) {
+      return;
+    }
+    if (kIsWeb) {
+      return;
+    }
+
+    setState(() {
+      _googleBusy = true;
+      _localError = null;
+    });
+
+    try {
+      final account = await _googleSignIn.authenticate();
+      await _completeGoogleSignIn(account);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _googleBusy = false;
+        _localError = _googleErrorMessage(error);
+      });
+    }
+  }
+
+  Future<void> _completeGoogleSignIn(GoogleSignInAccount account) async {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _googleBusy = true;
+      _localError = null;
+    });
+
+    await widget.session.signInWithGoogleAccount(account);
+
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _googleBusy = false;
+    });
+  }
+
+  String _googleErrorMessage(Object error) {
+    if (error is GoogleSignInException) {
+      return error.description ?? error.toString();
+    }
+    return error.toString();
+  }
+
   String? _validate() {
     final email = _email.text.trim();
     if (email.isEmpty || !email.contains('@') || !email.contains('.')) {
@@ -49,6 +172,9 @@ class _LoginScreenState extends State<LoginScreen> {
     }
     if (_password.text.length < 6) {
       return 'Password must be at least 6 characters.';
+    }
+    if (_isSignUp && _displayName.text.trim().isEmpty) {
+      return 'Display name cannot be empty.';
     }
     if (_isSignUp && _password.text != _confirm.text) {
       return 'Passwords do not match.';
@@ -71,15 +197,14 @@ class _LoginScreenState extends State<LoginScreen> {
     if (_isSignUp) {
       widget.session.signUp(email, password, displayName: displayName);
     } else {
-      widget.session.signIn(email, password, displayName: displayName);
+      widget.session.signIn(email, password);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final busy = widget.session.status == SessionStatus.signingIn;
-    final hasKey = AppConfig.hasFirebaseApiKey;
-    final error = _localError ?? widget.session.errorMessage;
+    final busy = widget.session.status == SessionStatus.signingIn || _googleBusy;
+    final error = _localError ?? widget.session.errorMessage ?? _googleInitError;
 
     return Scaffold(
       body: Container(
@@ -97,33 +222,10 @@ class _LoginScreenState extends State<LoginScreen> {
         child: Center(
           child: SingleChildScrollView(
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1100),
+              constraints: const BoxConstraints(maxWidth: 640),
               child: Padding(
                 padding: const EdgeInsets.all(24),
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final compact = constraints.maxWidth < 900;
-                    final left = _heroPanel(context, hasKey);
-                    final right = _formPanel(context, busy, error, hasKey);
-                    if (compact) {
-                      return Column(
-                        children: [
-                          left,
-                          const SizedBox(height: 20),
-                          right,
-                        ],
-                      );
-                    }
-                    return Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(flex: 5, child: left),
-                        const SizedBox(width: 20),
-                        Expanded(flex: 4, child: right),
-                      ],
-                    );
-                  },
-                ),
+                child: _formPanel(context, busy, error),
               ),
             ),
           ),
@@ -132,84 +234,10 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  Widget _heroPanel(BuildContext context, bool hasKey) {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF0D1726).withValues(alpha: 0.95),
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: const Color(0xFF2B4563)),
-        boxShadow: const [
-          BoxShadow(
-            color: Colors.black54,
-            blurRadius: 28,
-            offset: Offset(0, 16),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'DARTSTREAM ARENA',
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  color: Theme.of(context).colorScheme.secondary,
-                  letterSpacing: 2,
-                  fontWeight: FontWeight.w700,
-                ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'A cinematic 3D action shooter where your account enters the arena, your progress carries forward, and every tap turns into firepower.',
-            style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  height: 0.95,
-                ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Sign up or sign in to enter the strike zone, load your operator profile, and continue your run with live save data behind the scenes.',
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color: const Color(0xFFB7C6DA),
-                  height: 1.5,
-                ),
-          ),
-          const SizedBox(height: 20),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: const [
-              _Pill(label: 'Live auth', icon: Icons.key_rounded),
-              _Pill(label: 'Strike loadout', icon: Icons.shield_rounded),
-              _Pill(label: 'Cloud save', icon: Icons.cloud_sync_rounded),
-              _Pill(label: 'Action campaign', icon: Icons.local_fire_department_rounded),
-            ],
-          ),
-          const SizedBox(height: 20),
-          _FeatureCard(
-            icon: Icons.play_circle_rounded,
-            title: 'Built for action',
-            body:
-                'Create your operator, drop into the arena, then keep shooting, chaining hits, and climbing the scoreboard.',
-          ),
-          const SizedBox(height: 12),
-          _FeatureCard(
-            icon: Icons.rocket_launch_rounded,
-            title: 'Starts safely',
-            body: hasKey
-                ? 'Firebase key loaded and ready.'
-                : 'Firebase key is unavailable, so auth will not start until one is supplied.',
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _formPanel(
     BuildContext context,
     bool busy,
     String? error,
-    bool hasKey,
   ) {
     return Container(
       decoration: BoxDecoration(
@@ -317,88 +345,31 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ),
           ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: Divider(color: Colors.white.withValues(alpha: 0.12)),
+              ),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 12),
+                child: Text('or'),
+              ),
+              Expanded(
+                child: Divider(color: Colors.white.withValues(alpha: 0.12)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          googleSignInButton(
+            enabled: !busy,
+            ready: _googleReady || !kIsWeb,
+            onPressed: _startGoogleSignIn,
+          ),
           if (error != null) ...[
             const SizedBox(height: 12),
             _ErrorBanner(message: error),
           ],
-        ],
-      ),
-    );
-  }
-}
-
-class _Pill extends StatelessWidget {
-  const _Pill({required this.label, required this.icon});
-
-  final String label;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF0A1626),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: const Color(0xFF2C4663)),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: Theme.of(context).colorScheme.secondary),
-          const SizedBox(width: 8),
-          Text(label),
-        ],
-      ),
-    );
-  }
-}
-
-class _FeatureCard extends StatelessWidget {
-  const _FeatureCard({
-    required this.icon,
-    required this.title,
-    required this.body,
-  });
-
-  final IconData icon;
-  final String title;
-  final String body;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF0A1626),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFF2C4663)),
-      ),
-      padding: const EdgeInsets.all(16),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: Theme.of(context).colorScheme.secondary),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  body,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: const Color(0xFFB7C6DA),
-                      ),
-                ),
-              ],
-            ),
-          ),
         ],
       ),
     );

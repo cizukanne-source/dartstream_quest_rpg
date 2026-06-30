@@ -40,10 +40,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   DartStreamClient get _client => widget.session.client!;
   DartStreamSession get _sdkSession => widget.session.sdkSession!;
-  String get _displayName =>
-      widget.session.displayName ??
-      widget.session.email?.split('@').first ??
-      'Player';
+  String? get _displayName => widget.session.displayName;
 
   @override
   void initState() {
@@ -603,7 +600,7 @@ class _GameState {
   String get themeLabel => lightThemeEnabled ? 'Light' : 'Dark';
 
   factory _GameState.fromLiveData({
-    required String displayName,
+    required String? displayName,
     required Map<String, dynamic> profileData,
     required List<dynamic> flags,
     required List<dynamic> inventory,
@@ -615,9 +612,12 @@ class _GameState {
   }) {
     final snapshot = _flattenSnapshot(saved);
     final savedName =
+        (displayName != null && displayName.trim().isNotEmpty
+            ? displayName.trim()
+            : null) ??
         _stringFromMap(snapshot, const ['displayName', 'display_name']) ??
-            _stringFromMap(profileData, const ['displayName', 'display_name', 'name']) ??
-            displayName;
+        _stringFromMap(profileData, const ['displayName', 'display_name', 'name']) ??
+        'Player';
     final heroClass =
         _stringFromMap(snapshot, const ['heroClass', 'hero_class']) ??
             _stringFromMap(profileData, const ['heroClass', 'hero_class', 'class']) ??

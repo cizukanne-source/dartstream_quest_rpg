@@ -1,15 +1,20 @@
-import 'dart:typed_data';
+import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:dartstream_client/dartstream_client.dart';
 import 'package:flutter/material.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config.dart';
 
 enum SessionStatus { signedOut, signingIn, signedIn, error }
 
 class Session extends ChangeNotifier {
+  static const _storageKey = 'dartstream_quest_rpg.session.v1';
+
   SessionStatus status = SessionStatus.signedOut;
   String? email;
   String? displayName;
@@ -28,6 +33,49 @@ class Session extends ChangeNotifier {
   Future<void> signIn(String email, String password, {String? displayName}) =>
       _authenticate(email, password, signUp: false, displayName: displayName);
 
+  Future<void> signInWithGoogleAccount(GoogleSignInAccount account) async {
+    status = SessionStatus.signingIn;
+    errorMessage = null;
+    notifyListeners();
+
+    try {
+      final idToken = account.authentication.idToken;
+      if (idToken == null || idToken.isEmpty) {
+        throw StateError('Google sign-in did not return an ID token.');
+      }
+
+      final client = DartStreamClient(config: AppConfig.dartStreamConfig);
+      final session = await client.auth.onboardProviderIdToken(
+        provider: DartStreamAuthProvider.google,
+        firebaseIdToken: idToken,
+      );
+
+      await _applySignedInConnection(
+        DartStreamConnection(
+          client: client.withSession(session),
+          session: session,
+        ),
+        emailOverride: account.email,
+        displayName: account.displayName,
+        photoUrl: account.photoUrl,
+      );
+    } on DartStreamFirebaseAuthException catch (error) {
+      status = SessionStatus.error;
+      errorMessage = error.message;
+    } on DartStreamApiException catch (error) {
+      status = SessionStatus.error;
+      errorMessage = _friendlyApiError(error);
+    } on StateError catch (error) {
+      status = SessionStatus.error;
+      errorMessage = error.message;
+    } catch (error) {
+      status = SessionStatus.error;
+      errorMessage = error.toString();
+    }
+
+    notifyListeners();
+  }
+
   DartStreamClient? get client => connection?.client;
 
   DartStreamSession? get sdkSession => connection?.session;
@@ -39,6 +87,10 @@ class Session extends ChangeNotifier {
   bool get lightThemeEnabled => hasFeatureFlag('light_mode');
 
   bool get darkThemeEnabled => hasFeatureFlag('dark_mode');
+
+  bool get reduceMusicVolumeEnabled => hasFeatureFlag('reduce_music_volume');
+
+  bool get reduceSfxVolumeEnabled => hasFeatureFlag('reduce_sfx_volume');
 
   ThemeMode get themeMode {
     if (lightThemeEnabled) {
@@ -54,6 +106,26 @@ class Session extends ChangeNotifier {
   void dispose() {
     _closeConnection();
     super.dispose();
+  }
+
+  Future<void> restore() async {
+    final prefs = await SharedPreferences.getInstance();
+    final encoded = prefs.getString(_storageKey);
+    if (encoded == null || encoded.isEmpty) {
+      return;
+    }
+
+    try {
+      final decoded = jsonDecode(encoded);
+      if (decoded is! Map) {
+        await prefs.remove(_storageKey);
+        return;
+      }
+      _applyPersistedState(Map<String, dynamic>.from(decoded));
+    } catch (_) {
+      await prefs.remove(_storageKey);
+      signOut();
+    }
   }
 
   Future<void> _authenticate(
@@ -80,17 +152,15 @@ class Session extends ChangeNotifier {
               password: password,
             );
 
-      _closeConnection();
-      this.connection = connection;
-      this.email = connection.session.email;
-      this.displayName = displayName;
-      photoUrl = _stringFromMap(connection.session.raw, const ['photoUrl', 'photo_url']);
-      avatarBytes = null;
-      userId = connection.session.userId;
-      tenantId = connection.session.tenantId;
-      bootstrap = connection.session.raw;
-      featureFlags = const [];
-      status = SessionStatus.signedIn;
+      await _applySignedInConnection(
+        connection,
+        displayName: displayName,
+        photoUrl:
+            _stringFromMap(connection.session.raw, const ['photoUrl', 'photo_url']),
+      );
+      if (signUp && displayName != null && displayName.trim().isNotEmpty) {
+        await updateDisplayName(displayName.trim());
+      }
     } on DartStreamFirebaseAuthException catch (error) {
       status = SessionStatus.error;
       errorMessage = error.message;
@@ -137,7 +207,34 @@ class Session extends ChangeNotifier {
     connection = null;
     featureFlags = const [];
     bootstrap = null;
+    _clearPersistedSession();
     notifyListeners();
+  }
+
+  Future<void> _applySignedInConnection(
+    DartStreamConnection connection, {
+    String? emailOverride,
+    String? displayName,
+    String? photoUrl,
+    Uint8List? avatarBytes,
+  }) async {
+    _closeConnection();
+    this.connection = connection;
+    email = connection.session.email ?? emailOverride;
+    this.displayName = displayName;
+    this.photoUrl =
+        photoUrl ?? _stringFromMap(connection.session.raw, const ['photoUrl', 'photo_url']);
+    this.avatarBytes = avatarBytes;
+    userId = connection.session.userId;
+    tenantId = connection.session.tenantId;
+    bootstrap = connection.session.raw;
+    featureFlags = const [];
+    status = SessionStatus.signedIn;
+    try {
+      await save();
+    } catch (_) {
+      // Persistence is best-effort; login should still succeed if storage is unavailable.
+    }
   }
 
   void _closeConnection() {
@@ -147,6 +244,7 @@ class Session extends ChangeNotifier {
 
   void updateFeatureFlags(List<dynamic> flags) {
     featureFlags = List<dynamic>.unmodifiable(flags);
+    unawaited(save());
     notifyListeners();
   }
 
@@ -165,6 +263,7 @@ class Session extends ChangeNotifier {
     photoUrl = _stringFromMap(profile, const ['photoUrl', 'photo_url']);
     avatarBytes = results[1] as Uint8List?;
     bootstrap = profile;
+    unawaited(save());
     notifyListeners();
   }
 
@@ -179,6 +278,7 @@ class Session extends ChangeNotifier {
       displayName: newDisplayName,
     );
     displayName = newDisplayName;
+    unawaited(save());
     notifyListeners();
   }
 
@@ -194,6 +294,7 @@ class Session extends ChangeNotifier {
       clearPhotoUrl: newPhotoUrl == null || newPhotoUrl.isEmpty,
     );
     photoUrl = newPhotoUrl == null || newPhotoUrl.isEmpty ? null : newPhotoUrl;
+    unawaited(save());
     notifyListeners();
   }
 
@@ -209,6 +310,7 @@ class Session extends ChangeNotifier {
       contentType: contentType,
     );
     avatarBytes = bytes;
+    unawaited(save());
     notifyListeners();
   }
 
@@ -220,6 +322,7 @@ class Session extends ChangeNotifier {
     }
     await currentClient.auth.deleteAvatar(currentSession);
     avatarBytes = null;
+    unawaited(save());
     notifyListeners();
   }
 
@@ -329,5 +432,113 @@ class Session extends ChangeNotifier {
       }
     }
     return null;
+  }
+
+  Future<void> save() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (status != SessionStatus.signedIn || connection == null) {
+      await prefs.remove(_storageKey);
+      return;
+    }
+
+    final snapshot = <String, dynamic>{
+      'status': status.name,
+      'email': email,
+      'displayName': displayName,
+      'photoUrl': photoUrl,
+      'avatarBytes': avatarBytes == null ? null : base64Encode(avatarBytes!),
+      'userId': userId,
+      'tenantId': tenantId,
+      'errorMessage': errorMessage,
+      'featureFlags': featureFlags,
+      'bootstrap': bootstrap,
+      'session': _sessionToJson(connection!.session),
+    };
+
+    await prefs.setString(_storageKey, jsonEncode(snapshot));
+  }
+
+  Future<void> _clearPersistedSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_storageKey);
+  }
+
+  void _applyPersistedState(Map<String, dynamic> snapshot) {
+    final sessionJson = snapshot['session'];
+    if (sessionJson is! Map) {
+      signOut();
+      return;
+    }
+
+    final restoredSession = _sessionFromJson(Map<String, dynamic>.from(sessionJson));
+    final restoredClient = DartStreamClient(
+      config: AppConfig.dartStreamConfig,
+      session: restoredSession,
+    );
+
+    connection = DartStreamConnection(
+      client: restoredClient,
+      session: restoredSession,
+    );
+    status = SessionStatus.signedIn;
+    email = snapshot['email'] as String? ?? restoredSession.email;
+    displayName = snapshot['displayName'] as String?;
+    photoUrl = snapshot['photoUrl'] as String?;
+    avatarBytes = _bytesFromBase64(snapshot['avatarBytes']);
+    userId = snapshot['userId'] as String? ?? restoredSession.userId;
+    tenantId = snapshot['tenantId'] as String? ?? restoredSession.tenantId;
+    errorMessage = snapshot['errorMessage'] as String?;
+    featureFlags = _dynamicList(snapshot['featureFlags']);
+    bootstrap = _mapFromDynamic(snapshot['bootstrap']) ?? restoredSession.raw;
+  }
+
+  Map<String, dynamic> _sessionToJson(DartStreamSession session) => <String, dynamic>{
+    'idToken': session.idToken,
+    'userId': session.userId,
+    'tenantId': session.tenantId,
+    'email': session.email,
+    'canonicalTenantId': session.canonicalTenantId,
+    'tenantRole': session.tenantRole,
+    'raw': session.raw,
+  };
+
+  DartStreamSession _sessionFromJson(Map<String, dynamic> json) {
+    return DartStreamSession(
+      idToken: json['idToken'] as String,
+      userId: json['userId'] as String,
+      tenantId: json['tenantId'] as String,
+      email: json['email'] as String?,
+      canonicalTenantId: json['canonicalTenantId'] as String?,
+      tenantRole: json['tenantRole'] as String?,
+      raw: _mapFromDynamic(json['raw']) ?? const <String, dynamic>{},
+    );
+  }
+
+  Map<String, dynamic>? _mapFromDynamic(dynamic value) {
+    if (value is Map<String, dynamic>) {
+      return value;
+    }
+    if (value is Map) {
+      return Map<String, dynamic>.from(value);
+    }
+    return null;
+  }
+
+  List<dynamic> _dynamicList(dynamic value) {
+    if (value is List) {
+      return List<dynamic>.from(value);
+    }
+    return const [];
+  }
+
+  Uint8List? _bytesFromBase64(dynamic value) {
+    if (value is! String || value.isEmpty) {
+      return null;
+    }
+    try {
+      return base64Decode(value);
+    } catch (_) {
+      return null;
+    }
   }
 }

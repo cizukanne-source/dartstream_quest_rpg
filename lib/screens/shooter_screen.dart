@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
+import '../services/game_audio_service.dart';
 import '../state/session.dart';
 
 class ShooterScreen extends StatefulWidget {
@@ -40,12 +42,6 @@ class _ShooterScreenState extends State<ShooterScreen>
   bool _paused = false;
   bool _gameOver = false;
   String? _banner;
-
-  Session get _session => widget.session;
-  String get _playerName =>
-      _session.displayName ??
-      _session.email?.split('@').first ??
-      'Operator';
 
   Offset _defaultAimPosition(Size size) => Offset(size.width / 2, size.height / 2);
 
@@ -89,6 +85,7 @@ class _ShooterScreenState extends State<ShooterScreen>
   void initState() {
     super.initState();
     _ticker = createTicker(_onTick)..start();
+    unawaited(GameAudioService.instance.ensureMusicPlaying());
   }
 
   @override
@@ -161,6 +158,7 @@ class _ShooterScreenState extends State<ShooterScreen>
       _gameOver = true;
       _paused = true;
       _flashBanner('Mission failed');
+      unawaited(GameAudioService.instance.playRoundEndCue(victory: false));
     }
   }
 
@@ -174,14 +172,14 @@ class _ShooterScreenState extends State<ShooterScreen>
         : kindRoll < 0.82
             ? _TargetKind.turret
             : _TargetKind.armor;
-    final baseSpeed = kind == _TargetKind.armor ? 0.17 : 0.22;
-    final waveBoost = min(0.14, (_wave - 1) * 0.015);
+    final baseSpeed = kind == _TargetKind.armor ? 0.12 : 0.16;
+    final waveBoost = min(0.08, (_wave - 1) * 0.01);
     _targets.add(
       _Target(
         id: DateTime.now().microsecondsSinceEpoch + _targets.length,
         lane: lane,
         depth: depth,
-        speed: baseSpeed + waveBoost + _rng.nextDouble() * 0.06,
+        speed: baseSpeed + waveBoost + _rng.nextDouble() * 0.03,
         sway: _rng.nextDouble() * pi * 2,
         drift: 0.8 + _rng.nextDouble() * 1.2,
         damage: kind == _TargetKind.armor ? 20 : 14,
@@ -203,6 +201,7 @@ class _ShooterScreenState extends State<ShooterScreen>
     _reloading = true;
     _reloadClock = 0.9;
     _flashBanner('Reloading');
+    unawaited(GameAudioService.instance.playReloadCue());
   }
 
   void _finishReload() {
@@ -244,6 +243,7 @@ class _ShooterScreenState extends State<ShooterScreen>
       _paused = !_paused;
       _flashBanner(_paused ? 'Paused' : 'Engaged');
     });
+    unawaited(GameAudioService.instance.playPauseCue(paused: _paused));
   }
 
   void _fireAt(Offset position) {
@@ -264,6 +264,7 @@ class _ShooterScreenState extends State<ShooterScreen>
     }
 
     _ammo -= 1;
+    unawaited(GameAudioService.instance.playCue(GameAudioCue.fire));
 
     _RenderedTarget? bestHit;
     for (final target in _targets) {
@@ -283,10 +284,12 @@ class _ShooterScreenState extends State<ShooterScreen>
       _combo += 1;
       _impacts.add(_Impact(position: position, life: 0.22));
       _flashBanner('+$points');
+      unawaited(GameAudioService.instance.playHitCue());
     } else {
       _combo = 0;
       _impacts.add(_Impact(position: position, life: 0.16, miss: true));
       _flashBanner('Miss');
+      unawaited(GameAudioService.instance.playMissCue());
     }
 
     if (_ammo == 0) {
@@ -336,7 +339,7 @@ class _ShooterScreenState extends State<ShooterScreen>
               padding: const EdgeInsets.all(16),
               child: Column(
                 children: [
-                  _buildMissionHeader(context, subtitleColor),
+                  _buildMissionHeader(context),
                   const SizedBox(height: 16),
                   Expanded(
                     child: wide
@@ -364,8 +367,7 @@ class _ShooterScreenState extends State<ShooterScreen>
     );
   }
 
-  Widget _buildMissionHeader(BuildContext context, Color subtitleColor) {
-    final theme = Theme.of(context);
+  Widget _buildMissionHeader(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF0B1220).withOpacity(0.84),
@@ -375,39 +377,39 @@ class _ShooterScreenState extends State<ShooterScreen>
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
       child: Row(
         children: [
-          Container(
-            width: 46,
-            height: 46,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: const RadialGradient(
-                colors: [Color(0xFFFFA24A), Color(0xFFE6492D)],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFFFF7A3D).withOpacity(0.45),
-                  blurRadius: 18,
-                ),
-              ],
-            ),
-            child: const Icon(Icons.gps_fixed_rounded, color: Colors.white),
-          ),
-          const SizedBox(width: 14),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
               children: [
-                Text(
-                  '3D strike arena',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 0.4,
+                Expanded(
+                  child: _StatCard(
+                    label: 'Score',
+                    value: '$_score',
+                    icon: Icons.emoji_events_rounded,
                   ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  'Operator $_playerName, eliminate incoming targets before they breach the line.',
-                  style: theme.textTheme.bodySmall?.copyWith(color: subtitleColor),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _StatCard(
+                    label: 'Combo',
+                    value: 'x$_combo',
+                    icon: Icons.bolt_rounded,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _StatCard(
+                    label: 'Status',
+                    value: _gameOver
+                        ? 'Down'
+                        : _paused
+                            ? 'Paused'
+                            : 'Engaged',
+                    icon: _gameOver
+                        ? Icons.warning_amber_rounded
+                        : _paused
+                            ? Icons.pause_circle_rounded
+                            : Icons.track_changes_rounded,
+                  ),
                 ),
               ],
             ),
@@ -610,40 +612,6 @@ class _ShooterScreenState extends State<ShooterScreen>
             Text(
               'Track moving targets in a neon strike corridor and keep the line from collapsing.',
               style: theme.textTheme.bodyMedium?.copyWith(color: subtitleColor),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: _StatCard(
-                    label: 'Score',
-                    value: '$_score',
-                    icon: Icons.emoji_events_rounded,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _StatCard(
-                    label: 'Combo',
-                    value: 'x$_combo',
-                    icon: Icons.bolt_rounded,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            _StatCard(
-              label: 'Status',
-              value: _gameOver
-                  ? 'Down'
-                  : _paused
-                      ? 'Paused'
-                      : 'Engaged',
-              icon: _gameOver
-                  ? Icons.warning_amber_rounded
-                  : _paused
-                      ? Icons.pause_circle_rounded
-                      : Icons.track_changes_rounded,
             ),
             const SizedBox(height: 16),
             Container(

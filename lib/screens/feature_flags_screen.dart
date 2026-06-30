@@ -13,6 +13,9 @@ class FeatureFlagsScreen extends StatefulWidget {
 }
 
 class _FeatureFlagsScreenState extends State<FeatureFlagsScreen> {
+  static const _reduceMusicFlagKey = 'reduce_music_volume';
+  static const _reduceSfxFlagKey = 'reduce_sfx_volume';
+
   bool _loading = true;
   bool _saving = false;
   String? _error;
@@ -109,6 +112,57 @@ class _FeatureFlagsScreenState extends State<FeatureFlagsScreen> {
     }
   }
 
+  Future<void> _setFlagEnabled(
+    String key,
+    bool enabled, {
+    required String name,
+    required String description,
+  }) async {
+    final existing = _flagForKey(key);
+    setState(() => _saving = true);
+    try {
+      if (existing != null) {
+        await _client.platform.updateFeatureFlag(
+          _sdkSession,
+          key,
+          updates: {
+            ...(_mapFlag(existing) ?? <String, dynamic>{}),
+            'key': key,
+            'name': name,
+            'description': description,
+            'enabled': enabled,
+            'value': enabled,
+          },
+        );
+      } else if (enabled) {
+        await _client.platform.createFeatureFlag(
+          _sdkSession,
+          flag: {
+            'key': key,
+            'name': name,
+            'description': description,
+            'enabled': true,
+            'value': true,
+          },
+        );
+      }
+      await _load();
+    } catch (error) {
+      if (mounted) setState(() => _error = '$error');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  dynamic _flagForKey(String key) {
+    for (final flag in _flags) {
+      if (_flagKey(flag) == key) {
+        return flag;
+      }
+    }
+    return null;
+  }
+
   Future<void> _deleteFlag(dynamic flag) async {
     final key = _flagKey(flag);
     setState(() => _saving = true);
@@ -150,7 +204,13 @@ class _FeatureFlagsScreenState extends State<FeatureFlagsScreen> {
       'hard_mode',
       'light_mode',
       'dark_mode',
+      _reduceMusicFlagKey,
+      _reduceSfxFlagKey,
     ];
+    final reduceMusicExists = _flagForKey(_reduceMusicFlagKey) != null;
+    final reduceSfxExists = _flagForKey(_reduceSfxFlagKey) != null;
+    final reduceMusicEnabled = _flagEnabled(_flagForKey(_reduceMusicFlagKey));
+    final reduceSfxEnabled = _flagEnabled(_flagForKey(_reduceSfxFlagKey));
 
     return ListView(
       padding: const EdgeInsets.all(20),
@@ -189,6 +249,26 @@ class _FeatureFlagsScreenState extends State<FeatureFlagsScreen> {
         if (_loading)
           const LinearProgressIndicator(minHeight: 6)
         else ...[
+          _AudioFlagCard(
+            saving: _saving,
+            musicEnabled: reduceMusicEnabled,
+            musicExists: reduceMusicExists,
+            sfxEnabled: reduceSfxEnabled,
+            sfxExists: reduceSfxExists,
+            onMusicChanged: (value) => _setFlagEnabled(
+              _reduceMusicFlagKey,
+              value,
+              name: 'Reduce music volume',
+              description: 'Lowers the battle music mix so the action stays readable.',
+            ),
+            onSfxChanged: (value) => _setFlagEnabled(
+              _reduceSfxFlagKey,
+              value,
+              name: 'Reduce SFX volume',
+              description: 'Softens the game effects so cues stay present but less sharp.',
+            ),
+          ),
+          const SizedBox(height: 16),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -277,6 +357,143 @@ class _FlagCard extends StatelessWidget {
             icon: const Icon(Icons.delete_outline_rounded),
             label: const Text('Delete'),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AudioFlagCard extends StatelessWidget {
+  const _AudioFlagCard({
+    required this.saving,
+    required this.musicEnabled,
+    required this.musicExists,
+    required this.sfxEnabled,
+    required this.sfxExists,
+    required this.onMusicChanged,
+    required this.onSfxChanged,
+  });
+
+  final bool saving;
+  final bool musicEnabled;
+  final bool musicExists;
+  final bool sfxEnabled;
+  final bool sfxExists;
+  final ValueChanged<bool> onMusicChanged;
+  final ValueChanged<bool> onSfxChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface.withOpacity(0.92),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: theme.colorScheme.outlineVariant.withOpacity(0.5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Audio mix',
+                  style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+                ),
+              ),
+              const Icon(Icons.graphic_eq_rounded),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'These flags keep the game audible, but make the music or the effects sit lower in the mix when you need a softer feel.',
+            style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 14),
+          _AudioToggleRow(
+            title: 'Reduce music volume',
+            subtitle: musicExists ? 'Already seeded in the tenant.' : 'Will be created on first toggle.',
+            icon: Icons.music_note_rounded,
+            value: musicEnabled,
+            enabled: !saving,
+            accent: const Color(0xFF41A6FF),
+            onChanged: onMusicChanged,
+          ),
+          const SizedBox(height: 12),
+          _AudioToggleRow(
+            title: 'Reduce SFX volume',
+            subtitle: sfxExists ? 'Already seeded in the tenant.' : 'Will be created on first toggle.',
+            icon: Icons.surround_sound_rounded,
+            value: sfxEnabled,
+            enabled: !saving,
+            accent: const Color(0xFFFFA24A),
+            onChanged: onSfxChanged,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AudioToggleRow extends StatelessWidget {
+  const _AudioToggleRow({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.value,
+    required this.enabled,
+    required this.accent,
+    required this.onChanged,
+  });
+
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final bool value;
+  final bool enabled;
+  final Color accent;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0A1626),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: accent.withOpacity(0.22)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: accent.withOpacity(0.18),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(icon, color: accent),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: const Color(0xFFB7C6DA)),
+                ),
+              ],
+            ),
+          ),
+          Switch.adaptive(value: value, onChanged: enabled ? onChanged : null),
         ],
       ),
     );

@@ -1,7 +1,6 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 
 import '../state/session.dart';
 
@@ -15,21 +14,15 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  final _imagePicker = ImagePicker();
   final _displayName = TextEditingController();
-  final _photoUrl = TextEditingController();
   final _newPassword = TextEditingController();
   final _confirmPassword = TextEditingController();
 
   bool _loading = true;
   bool _savingProfile = false;
   bool _savingPassword = false;
-  bool _deletingAvatar = false;
   String? _error;
   Map<String, dynamic>? _profile;
-  Uint8List? _selectedAvatarBytes;
-  String? _selectedAvatarName;
-  String? _selectedAvatarContentType;
 
   @override
   void initState() {
@@ -40,30 +33,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void dispose() {
     _displayName.dispose();
-    _photoUrl.dispose();
     _newPassword.dispose();
     _confirmPassword.dispose();
     super.dispose();
-  }
-
-  void _clearSelectedAvatar() {
-    _selectedAvatarBytes = null;
-    _selectedAvatarName = null;
-    _selectedAvatarContentType = null;
   }
 
   Future<void> _hydrate() async {
     setState(() {
       _loading = true;
       _error = null;
-      _clearSelectedAvatar();
     });
     try {
       await widget.session.refreshProfile();
       if (!mounted) return;
       _profile = widget.session.bootstrap;
       _displayName.text = widget.session.displayName ?? '';
-      _photoUrl.text = widget.session.photoUrl ?? '';
       setState(() {
         _loading = false;
       });
@@ -76,40 +60,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  Future<void> _pickAvatarFile() async {
-    try {
-      final file = await _imagePicker.pickImage(source: ImageSource.gallery);
-      if (file == null) {
-        return;
-      }
-      final bytes = await file.readAsBytes();
-      if (bytes.isEmpty) {
-        if (!mounted) {
-          return;
-        }
-        setState(() => _error = 'The selected image was empty.');
-        return;
-      }
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _selectedAvatarBytes = bytes;
-        _selectedAvatarName = file.name;
-        _selectedAvatarContentType = _contentTypeForFileName(file.name);
-        _error = null;
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      setState(() => _error = '$error');
-    }
-  }
-
   Future<void> _saveProfile() async {
     final name = _displayName.text.trim();
-    final photoUrl = _photoUrl.text.trim();
     if (name.isEmpty) {
       setState(() => _error = 'Display name cannot be empty.');
       return;
@@ -120,16 +72,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     });
     try {
       await widget.session.updateDisplayName(name);
-      if (_selectedAvatarBytes != null && _selectedAvatarContentType != null) {
-        await widget.session.uploadAvatar(
-          _selectedAvatarBytes!,
-          contentType: _selectedAvatarContentType!,
-        );
-      }
-      await widget.session.updatePhotoUrl(photoUrl.isEmpty ? null : photoUrl);
-      if (_selectedAvatarBytes != null && mounted) {
-        setState(_clearSelectedAvatar);
-      }
       await widget.session.refreshProfile();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -143,31 +85,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } finally {
       if (mounted) {
         setState(() => _savingProfile = false);
-      }
-    }
-  }
-
-  Future<void> _deleteAvatar() async {
-    setState(() {
-      _deletingAvatar = true;
-      _error = null;
-    });
-    try {
-      await widget.session.deleteAvatar();
-      await widget.session.refreshProfile();
-      if (mounted) {
-        setState(_clearSelectedAvatar);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Avatar removed')),
-        );
-      }
-    } catch (error) {
-      if (mounted) {
-        setState(() => _error = '$error');
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _deletingAvatar = false);
       }
     }
   }
@@ -215,8 +132,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final theme = Theme.of(context);
     final trimmedName = _displayName.text.trim();
     final initials = trimmedName.isEmpty ? '?' : trimmedName.substring(0, 1).toUpperCase();
-    final avatarBytes = _selectedAvatarBytes ?? widget.session.avatarBytes;
-    final photoUrl = _selectedAvatarBytes == null ? widget.session.photoUrl : null;
+    final avatarBytes = widget.session.avatarBytes;
+    final photoUrl = widget.session.photoUrl;
 
     return ListView(
       padding: const EdgeInsets.all(20),
@@ -227,7 +144,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         const SizedBox(height: 8),
         Text(
-          'Update your in-app identity, avatar, and password.',
+          'Update your in-app identity and password.',
           style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
         ),
         if (_error != null) ...[
@@ -238,98 +155,63 @@ class _ProfileScreenState extends State<ProfileScreen> {
         LayoutBuilder(
           builder: (context, constraints) {
             final wide = constraints.maxWidth >= 900;
-            final left = _ProfileCard(
-              title: 'Identity',
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(
-                    child: _AvatarPreview(
-                      bytes: avatarBytes,
-                      photoUrl: photoUrl,
-                      initials: initials,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _displayName,
-                    decoration: const InputDecoration(
-                      labelText: 'Display name',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
+            final identityColumn = Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _ProfileCard(
+                  title: 'Identity',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: FilledButton.icon(
-                          onPressed: _savingProfile ? null : _pickAvatarFile,
-                          icon: const Icon(Icons.upload_file_rounded),
-                          label: const Text('Upload image file'),
+                      Center(
+                        child: _AvatarPreview(
+                          bytes: avatarBytes,
+                          photoUrl: photoUrl,
+                          initials: initials,
                         ),
                       ),
-                      if (_selectedAvatarBytes != null) ...[
-                        const SizedBox(width: 12),
-                        OutlinedButton.icon(
-                          onPressed: _savingProfile ? null : () => setState(_clearSelectedAvatar),
-                          icon: const Icon(Icons.clear_rounded),
-                          label: const Text('Clear selected file'),
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: _displayName,
+                        decoration: const InputDecoration(
+                          labelText: 'Display name',
+                          border: OutlineInputBorder(),
                         ),
-                      ],
-                      if (widget.session.avatarBytes != null) ...[
-                        const SizedBox(width: 12),
-                        OutlinedButton.icon(
-                          onPressed: _savingProfile || _deletingAvatar ? null : _deleteAvatar,
-                          icon: _deletingAvatar
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Icon(Icons.delete_outline_rounded),
-                          label: const Text('Remove avatar'),
-                        ),
-                      ],
+                      ),
+                      const SizedBox(height: 12),
+                      FilledButton.icon(
+                        onPressed: _savingProfile ? null : _saveProfile,
+                        icon: _savingProfile
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.save_rounded),
+                        label: const Text('Save profile'),
+                      ),
                     ],
                   ),
-                  if (_selectedAvatarName != null) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      'Selected file: $_selectedAvatarName',
-                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _photoUrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Avatar URL fallback',
-                      hintText: 'Optional legacy URL',
-                      border: OutlineInputBorder(),
-                    ),
+                ),
+                const SizedBox(height: 16),
+                _ProfileCard(
+                  title: 'Live profile',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(widget.session.displayName ?? 'Unnamed operator'),
+                      const SizedBox(height: 6),
+                      Text(
+                        _profile == null ? 'Profile not loaded yet.' : 'Profile is synced from DartStream.',
+                        style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Use a URL only if you do not want to upload a file.',
-                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                  ),
-                  const SizedBox(height: 12),
-                  FilledButton.icon(
-                    onPressed: _savingProfile ? null : _saveProfile,
-                    icon: _savingProfile
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.save_rounded),
-                    label: const Text('Save profile'),
-                  ),
-                ],
-              ),
+                ),
+              ],
             );
 
-            final right = Column(
+            final accountColumn = Column(
               children: [
                 _ProfileCard(
                   title: 'Account details',
@@ -384,21 +266,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 16),
-                _ProfileCard(
-                  title: 'Live profile',
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(widget.session.displayName ?? 'Unnamed operator'),
-                      const SizedBox(height: 6),
-                      Text(
-                        _profile == null ? 'Profile not loaded yet.' : 'Profile is synced from DartStream.',
-                        style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
-                      ),
-                    ],
-                  ),
-                ),
               ],
             );
 
@@ -406,17 +273,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
               return Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(flex: 5, child: left),
+                  Expanded(flex: 5, child: identityColumn),
                   const SizedBox(width: 16),
-                  Expanded(flex: 5, child: right),
+                  Expanded(flex: 5, child: accountColumn),
                 ],
               );
             }
             return Column(
               children: [
-                left,
+                identityColumn,
                 const SizedBox(height: 16),
-                right,
+                accountColumn,
               ],
             );
           },
@@ -548,16 +415,4 @@ class _InfoRow extends StatelessWidget {
       ],
     );
   }
-}
-
-String _contentTypeForFileName(String fileName) {
-  final lower = fileName.toLowerCase();
-  if (lower.endsWith('.png')) return 'image/png';
-  if (lower.endsWith('.gif')) return 'image/gif';
-  if (lower.endsWith('.webp')) return 'image/webp';
-  if (lower.endsWith('.bmp')) return 'image/bmp';
-  if (lower.endsWith('.heic')) return 'image/heic';
-  if (lower.endsWith('.heif')) return 'image/heif';
-  if (lower.endsWith('.avif')) return 'image/avif';
-  return 'image/jpeg';
 }

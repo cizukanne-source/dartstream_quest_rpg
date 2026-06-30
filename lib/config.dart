@@ -8,6 +8,7 @@ import 'package:dartstream_client/dartstream_client.dart';
 /// Build-time defines can override the Firebase API key and any service hosts.
 class AppConfig {
   static const _defaultFirebaseApiKey = '';
+  static const _defaultGoogleClientId = '';
 
   static const _defaultAuthHost = 'https://dev-apiauth.dartstream.io';
   static const _defaultPlatformHost = 'https://dev-apiplatform.dartstream.io';
@@ -24,6 +25,16 @@ class AppConfig {
   }
 
   static bool get hasFirebaseApiKey => firebaseApiKey.isNotEmpty;
+
+  static String get googleClientId {
+    final buildTimeClientId =
+        const String.fromEnvironment('GOOGLE_CLIENT_ID').trim();
+    return buildTimeClientId.isNotEmpty
+        ? buildTimeClientId
+        : _defaultGoogleClientId;
+  }
+
+  static bool get hasGoogleClientId => googleClientId.isNotEmpty;
 
   static String get authHost {
     final override = const String.fromEnvironment('API_AUTH').trim();

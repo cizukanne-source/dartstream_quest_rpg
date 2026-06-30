@@ -1,27 +1,36 @@
 import 'package:flutter/material.dart';
 
+import 'services/game_audio_service.dart';
 import 'screens/login_screen.dart';
 import 'screens/shell_screen.dart';
 import 'state/session.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const DartStreamQuestApp());
+  final session = Session();
+  await session.restore();
+  await GameAudioService.instance.attachSession(session);
+  runApp(DartStreamQuestApp(session: session));
 }
 
 class DartStreamQuestApp extends StatefulWidget {
-  const DartStreamQuestApp({super.key});
+  const DartStreamQuestApp({super.key, this.session});
+
+  final Session? session;
 
   @override
   State<DartStreamQuestApp> createState() => _DartStreamQuestAppState();
 }
 
 class _DartStreamQuestAppState extends State<DartStreamQuestApp> {
-  final Session _session = Session();
+  late final Session _session;
+  late final bool _ownsSession;
 
   @override
   void initState() {
     super.initState();
+    _ownsSession = widget.session == null;
+    _session = widget.session ?? Session();
     _session.addListener(_onSessionChanged);
   }
 
@@ -34,7 +43,9 @@ class _DartStreamQuestAppState extends State<DartStreamQuestApp> {
   @override
   void dispose() {
     _session.removeListener(_onSessionChanged);
-    _session.dispose();
+    if (_ownsSession) {
+      _session.dispose();
+    }
     super.dispose();
   }
 

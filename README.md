@@ -8,6 +8,7 @@ app:
 
 - `DartStreamClient.signUp(...)` / `DartStreamClient.signIn(...)` exchange
   Firebase email/password credentials for a live DartStream session
+- Google sign-in is also supported through the same DartStream session model
 - the returned `DartStreamConnection` is kept in app state and used for every
   typed SDK call
 - service reads and writes go through the SDK's auth, platform, experience,
@@ -26,6 +27,7 @@ flags against the signed-in DartStream identity.
 ## What the app does
 
 - creates or signs in a Firebase user
+- lets users continue with Google and lands them in the same DartStream tenant
 - boots the user into a DartStream tenant
 - shows a live RPG dashboard with XP, gold, streaks, quests, and bosses
 - persists quest progress to cloud save
@@ -36,6 +38,14 @@ flags against the signed-in DartStream identity.
 ```sh
 flutter pub get
 flutter run -d chrome --web-port=3000 --dart-define=FIREBASE_API_KEY=your_web_key_here
+```
+
+To enable Google sign-in, add a Google OAuth client ID as well:
+
+```sh
+flutter run -d chrome --web-port=3000 \
+  --dart-define=FIREBASE_API_KEY=your_web_key_here \
+  --dart-define=GOOGLE_CLIENT_ID=your_google_oauth_client_id.apps.googleusercontent.com
 ```
 
 To build the production web bundle:
@@ -58,6 +68,7 @@ firebase deploy --only hosting
 Required / optional build defines:
 
 - `FIREBASE_API_KEY` required for Firebase email/password auth in the web app
+- `GOOGLE_CLIENT_ID` optional for Google sign-in on web and native platforms
 - `API_AUTH` optional override for the auth service
 - `API_PLATFORM` optional override for the platform service
 - `API_EXPERIENCE` optional override for the experience service
@@ -202,6 +213,11 @@ For GitHub Actions deployment, add these secrets:
 
 Then the deploy workflow can publish the web bundle to the hosting site and
 create preview URLs automatically for feature branches / pull requests.
+
+For a Firebase preview or live Hosting deployment, make sure the web bundle was
+built with the Firebase and Google sign-in defines above. If the Google client
+ID is omitted, the Google button will fall back to the `web/index.html` meta
+tag instead.
 
 The GitHub Actions deploy job also expects these secrets so the hosted build
 gets the same IntelliToggle configuration as local runs. If any of them are

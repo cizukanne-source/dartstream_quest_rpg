@@ -31,11 +31,13 @@ dependencies:
   flutter:
     sdk: flutter
   dartstream_client: ^0.0.1
+  google_sign_in: ^7.2.0
+  google_sign_in_web: ^1.1.0
   http: ^1.2.2
-  image_picker: ^1.2.1
   openfeature_dart_server_sdk: ^0.0.22
   openfeature_provider_intellitoggle: ^0.0.9
   shared_preferences: ^2.3.2
+  web: ^1.1.1
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
