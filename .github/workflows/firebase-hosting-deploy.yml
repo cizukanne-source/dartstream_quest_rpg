@@ -3,12 +3,10 @@ name: Deploy to Firebase Hosting
 on:
   push:
     branches:
-      - '**'
-  pull_request:
+      - main
 
 jobs:
-  preview:
-    if: github.event_name == 'pull_request' || github.ref != 'refs/heads/main'
+  deploy:
     runs-on: ubuntu-latest
 
     steps:
@@ -32,14 +30,6 @@ jobs:
           INTELLITOGGLE_CLIENT_SECRET: ${{ secrets.INTELLITOGGLE_CLIENT_SECRET }}
           INTELLITOGGLE_TENANT_ID: ${{ secrets.INTELLITOGGLE_TENANT_ID }}
         run: |
-          if [ -z "${FIREBASE_WEB_API_KEY}" ]; then
-            echo "Missing FIREBASE_WEB_API_KEY secret."
-            exit 1
-          fi
-          if [ -z "${INTELLITOGGLE_CLIENT_ID}" ] || [ -z "${INTELLITOGGLE_CLIENT_SECRET}" ] || [ -z "${INTELLITOGGLE_TENANT_ID}" ]; then
-            echo "Missing IntelliToggle build secrets: INTELLITOGGLE_CLIENT_ID, INTELLITOGGLE_CLIENT_SECRET, INTELLITOGGLE_TENANT_ID."
-            exit 1
-          fi
           flutter build web --release \
             "--dart-define=FIREBASE_API_KEY=${FIREBASE_WEB_API_KEY}" \
             "--dart-define=INTELLITOGGLE_API_URL=${INTELLITOGGLE_API_URL:-https://dev-api.intellitoggle.com}" \
@@ -47,58 +37,19 @@ jobs:
             "--dart-define=INTELLITOGGLE_CLIENT_SECRET=${INTELLITOGGLE_CLIENT_SECRET}" \
             "--dart-define=INTELLITOGGLE_TENANT_ID=${INTELLITOGGLE_TENANT_ID}"
 
-      - name: Deploy preview to Firebase Hosting
-        uses: FirebaseExtended/action-hosting-deploy@v0
-        with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_AORTEM_SAMPLE_APPS }}
-          projectId: aortem-sample-apps
-          expires: 7d
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
 
-  live:
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Build web
+      - name: Deploy to Firebase Hosting
         env:
-          FIREBASE_WEB_API_KEY: ${{ secrets.FIREBASE_WEB_API_KEY }}
-          INTELLITOGGLE_API_URL: ${{ secrets.INTELLITOGGLE_API_URL }}
-          INTELLITOGGLE_CLIENT_ID: ${{ secrets.INTELLITOGGLE_CLIENT_ID }}
-          INTELLITOGGLE_CLIENT_SECRET: ${{ secrets.INTELLITOGGLE_CLIENT_SECRET }}
-          INTELLITOGGLE_TENANT_ID: ${{ secrets.INTELLITOGGLE_TENANT_ID }}
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
         run: |
-          if [ -z "${FIREBASE_WEB_API_KEY}" ]; then
-            echo "Missing FIREBASE_WEB_API_KEY secret."
+          if [ -z "$FIREBASE_TOKEN" ]; then
+            echo "Missing FIREBASE_TOKEN secret."
             exit 1
           fi
-          if [ -z "${INTELLITOGGLE_CLIENT_ID}" ] || [ -z "${INTELLITOGGLE_CLIENT_SECRET}" ] || [ -z "${INTELLITOGGLE_TENANT_ID}" ]; then
-            echo "Missing IntelliToggle build secrets: INTELLITOGGLE_CLIENT_ID, INTELLITOGGLE_CLIENT_SECRET, INTELLITOGGLE_TENANT_ID."
-            exit 1
-          fi
-          flutter build web --release \
-            "--dart-define=FIREBASE_API_KEY=${FIREBASE_WEB_API_KEY}" \
-            "--dart-define=INTELLITOGGLE_API_URL=${INTELLITOGGLE_API_URL:-https://dev-api.intellitoggle.com}" \
-            "--dart-define=INTELLITOGGLE_CLIENT_ID=${INTELLITOGGLE_CLIENT_ID}" \
-            "--dart-define=INTELLITOGGLE_CLIENT_SECRET=${INTELLITOGGLE_CLIENT_SECRET}" \
-            "--dart-define=INTELLITOGGLE_TENANT_ID=${INTELLITOGGLE_TENANT_ID}"
 
-      - name: Deploy live to Firebase Hosting
-        uses: FirebaseExtended/action-hosting-deploy@v0
-        with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_AORTEM_SAMPLE_APPS }}
-          projectId: aortem-sample-apps
-          channelId: live
+          firebase deploy \
+            --project aortem-sample-apps \
+            --only hosting \
+            --token "$FIREBASE_TOKEN"
