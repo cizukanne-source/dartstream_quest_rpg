@@ -151,7 +151,7 @@ class _LoginScreenState extends State<LoginScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'DARTSTREAM QUEST RPG',
+            'DARTSTREAM ARENA',
             style: Theme.of(context).textTheme.labelLarge?.copyWith(
                   color: Theme.of(context).colorScheme.secondary,
                   letterSpacing: 2,
@@ -160,7 +160,7 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
           const SizedBox(height: 12),
           Text(
-            'A playable quest runner where your account becomes a hero, your progress carries forward, and every tap moves the story.',
+            'A cinematic 3D action shooter where your account enters the arena, your progress carries forward, and every tap turns into firepower.',
             style: Theme.of(context).textTheme.displaySmall?.copyWith(
                   fontWeight: FontWeight.w900,
                   height: 0.95,
@@ -168,7 +168,7 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
           const SizedBox(height: 16),
           Text(
-            'Sign up or sign in to enter the realm, load your hero, and continue your run with live save data behind the scenes.',
+            'Sign up or sign in to enter the strike zone, load your operator profile, and continue your run with live save data behind the scenes.',
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                   color: const Color(0xFFB7C6DA),
                   height: 1.5,
@@ -179,18 +179,18 @@ class _LoginScreenState extends State<LoginScreen> {
             spacing: 10,
             runSpacing: 10,
             children: const [
-              _Pill(label: 'Firebase auth', icon: Icons.key_rounded),
-              _Pill(label: 'Tenant bootstrap', icon: Icons.shield_rounded),
+              _Pill(label: 'Live auth', icon: Icons.key_rounded),
+              _Pill(label: 'Strike loadout', icon: Icons.shield_rounded),
               _Pill(label: 'Cloud save', icon: Icons.cloud_sync_rounded),
-              _Pill(label: 'Quest log', icon: Icons.auto_awesome_rounded),
+              _Pill(label: 'Action campaign', icon: Icons.local_fire_department_rounded),
             ],
           ),
           const SizedBox(height: 20),
           _FeatureCard(
             icon: Icons.play_circle_rounded,
-            title: 'Playable from the start',
+            title: 'Built for action',
             body:
-                'Create your hero, load the quest hub, then keep fighting, looting, and levelling up with every session.',
+                'Create your operator, drop into the arena, then keep shooting, chaining hits, and climbing the scoreboard.',
           ),
           const SizedBox(height: 12),
           _FeatureCard(

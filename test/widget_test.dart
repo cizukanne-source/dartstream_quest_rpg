@@ -7,7 +7,7 @@ void main() {
   testWidgets('builds the app shell', (tester) async {
     await tester.pumpWidget(const DartStreamQuestApp());
 
-    expect(find.text('DARTSTREAM QUEST RPG'), findsOneWidget);
+    expect(find.text('DARTSTREAM ARENA'), findsOneWidget);
     expect(find.byType(TextField), findsNWidgets(4));
     expect(find.text('Create account'), findsNWidgets(2));
   });

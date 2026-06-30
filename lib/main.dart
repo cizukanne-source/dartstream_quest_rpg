@@ -42,7 +42,7 @@ class _DartStreamQuestAppState extends State<DartStreamQuestApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'DartStream Quest RPG',
+      title: 'DartStream Arena',
       theme: _buildTheme(Brightness.light),
       darkTheme: _buildTheme(Brightness.dark),
       themeMode: _session.themeMode,
@@ -54,23 +54,23 @@ class _DartStreamQuestAppState extends State<DartStreamQuestApp> {
 
   ThemeData _buildTheme(Brightness brightness) {
     final isDark = brightness == Brightness.dark;
-    final surface = isDark ? const Color(0xFF0D1726) : const Color(0xFFF6F8FC);
-    final scaffold = isDark ? const Color(0xFF07111C) : const Color(0xFFF2F5FA);
+    final surface = isDark ? const Color(0xFF121826) : const Color(0xFFF5F7FA);
+    final scaffold = isDark ? const Color(0xFF05070B) : const Color(0xFFF0F3F8);
     final textBase = isDark ? Typography.whiteMountainView : Typography.blackMountainView;
     return ThemeData(
       colorScheme: ColorScheme.fromSeed(
-        seedColor: isDark ? const Color(0xFF7DF9C5) : const Color(0xFF1F5BD8),
+        seedColor: isDark ? const Color(0xFFFF6B4A) : const Color(0xFF0E7490),
         brightness: brightness,
       ).copyWith(
-        primary: isDark ? const Color(0xFF7DF9C5) : const Color(0xFF1F5BD8),
-        secondary: isDark ? const Color(0xFFFFC857) : const Color(0xFF8A5A00),
+        primary: isDark ? const Color(0xFFFF6B4A) : const Color(0xFF0E7490),
+        secondary: isDark ? const Color(0xFF6EE7F9) : const Color(0xFFF97316),
         surface: surface,
       ),
       useMaterial3: true,
       scaffoldBackgroundColor: scaffold,
       textTheme: textBase.apply(
-        bodyColor: isDark ? const Color(0xFFEAF2FF) : const Color(0xFF1F2937),
-        displayColor: isDark ? const Color(0xFFEAF2FF) : const Color(0xFF111827),
+        bodyColor: isDark ? const Color(0xFFEAF2FF) : const Color(0xFF102033),
+        displayColor: isDark ? const Color(0xFFEAF2FF) : const Color(0xFF0F172A),
       ),
     );
   }
