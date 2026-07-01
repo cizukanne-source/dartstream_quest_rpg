@@ -305,7 +305,7 @@ class _ShooterScreenState extends State<ShooterScreen>
   Widget build(BuildContext context) {
     final wide = MediaQuery.sizeOf(context).width >= 980;
     final theme = Theme.of(context);
-    final subtitleColor = theme.colorScheme.onSurface.withOpacity(0.72);
+    final subtitleColor = theme.colorScheme.onSurface.withValues(alpha: 0.72);
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -370,9 +370,9 @@ class _ShooterScreenState extends State<ShooterScreen>
   Widget _buildMissionHeader(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF0B1220).withOpacity(0.84),
+        color: const Color(0xFF0B1220).withValues(alpha: 0.84),
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.white.withOpacity(0.08)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
       child: Row(
@@ -436,7 +436,7 @@ class _ShooterScreenState extends State<ShooterScreen>
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: Colors.white.withOpacity(0.08)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
         boxShadow: const [
           BoxShadow(
             color: Colors.black54,
@@ -513,14 +513,14 @@ class _ShooterScreenState extends State<ShooterScreen>
             if (_gameOver)
               Positioned.fill(
                 child: Container(
-                  color: Colors.black.withOpacity(0.58),
+                  color: Colors.black.withValues(alpha: 0.58),
                   child: Center(
                     child: Container(
                       width: 320,
                       decoration: BoxDecoration(
                         color: const Color(0xFF0B1220),
                         borderRadius: BorderRadius.circular(24),
-                        border: Border.all(color: Colors.white.withOpacity(0.08)),
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
                       ),
                       padding: const EdgeInsets.all(22),
                       child: Column(
@@ -574,9 +574,9 @@ class _ShooterScreenState extends State<ShooterScreen>
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
-          color: const Color(0xFF0B1220).withOpacity(0.78),
+          color: const Color(0xFF0B1220).withValues(alpha: 0.78),
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: Colors.white.withOpacity(0.08)),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
         ),
         child: Text(
           _banner!,
@@ -593,9 +593,9 @@ class _ShooterScreenState extends State<ShooterScreen>
     final theme = Theme.of(context);
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF0B1220).withOpacity(0.82),
+        color: const Color(0xFF0B1220).withValues(alpha: 0.82),
         borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: Colors.white.withOpacity(0.08)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
       padding: const EdgeInsets.all(18),
       child: SingleChildScrollView(
@@ -617,8 +617,8 @@ class _ShooterScreenState extends State<ShooterScreen>
             Container(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(20),
-                color: const Color(0xFF07111C).withOpacity(0.7),
-                border: Border.all(color: Colors.white.withOpacity(0.06)),
+                color: const Color(0xFF07111C).withValues(alpha: 0.7),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
               ),
               padding: const EdgeInsets.all(14),
               child: Column(
@@ -703,8 +703,8 @@ class _ShooterScreenState extends State<ShooterScreen>
             Container(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(20),
-                color: const Color(0xFF07111C).withOpacity(0.7),
-                border: Border.all(color: Colors.white.withOpacity(0.06)),
+                color: const Color(0xFF07111C).withValues(alpha: 0.7),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
               ),
               padding: const EdgeInsets.all(14),
               child: Column(
@@ -796,8 +796,8 @@ class _ArenaBackdropPainter extends CustomPainter {
     final glowPaint = Paint()
       ..shader = RadialGradient(
         colors: [
-          const Color(0xFFFF6B4A).withOpacity(0.22),
-          const Color(0xFF0B1220).withOpacity(0.0),
+          const Color(0xFFFF6B4A).withValues(alpha: 0.22),
+          const Color(0xFF0B1220).withValues(alpha: 0.0),
         ],
       ).createShader(
         Rect.fromCircle(
@@ -808,7 +808,7 @@ class _ArenaBackdropPainter extends CustomPainter {
     canvas.drawRect(rect, glowPaint);
 
     final floorPaint = Paint()
-      ..color = const Color(0xFF6EE7F9).withOpacity(0.08)
+      ..color = const Color(0xFF6EE7F9).withValues(alpha: 0.08)
       ..strokeWidth = 1.1;
 
     for (var i = -6; i <= 6; i++) {
@@ -823,7 +823,7 @@ class _ArenaBackdropPainter extends CustomPainter {
       if (i.abs() != 6) {
         final pulse = 0.07 + sin(time * 1.7 + i) * 0.03;
         final linePaint = Paint()
-          ..color = const Color(0xFFFFA24A).withOpacity(pulse)
+          ..color = const Color(0xFFFFA24A).withValues(alpha: pulse)
           ..strokeWidth = 1.2;
         canvas.drawLine(
           Offset(size.width * 0.12 * t, horizonY + 4),
@@ -839,7 +839,7 @@ class _ArenaBackdropPainter extends CustomPainter {
       final width = ui.lerpDouble(size.width * 0.12, size.width, t)!;
       final alpha = (0.05 + (1 - t) * 0.03) + sin(time * 2 + row) * 0.01;
       final rowPaint = Paint()
-        ..color = const Color(0xFF6EE7F9).withOpacity(alpha.clamp(0.0, 0.09))
+        ..color = const Color(0xFF6EE7F9).withValues(alpha: alpha.clamp(0.0, 0.09))
         ..strokeWidth = 1;
       canvas.drawLine(
         Offset((size.width - width) / 2, y),
@@ -851,8 +851,8 @@ class _ArenaBackdropPainter extends CustomPainter {
     final healthGlow = Paint()
       ..shader = RadialGradient(
         colors: [
-          const Color(0xFF34D399).withOpacity(health / 350),
-          const Color(0xFF34D399).withOpacity(0.0),
+          const Color(0xFF34D399).withValues(alpha: health / 350),
+          const Color(0xFF34D399).withValues(alpha: 0.0),
         ],
       ).createShader(
         Rect.fromCircle(
@@ -863,7 +863,7 @@ class _ArenaBackdropPainter extends CustomPainter {
     canvas.drawRect(rect, healthGlow);
 
     final streakPaint = Paint()
-      ..color = const Color(0xFFFFFFFF).withOpacity(0.05)
+      ..color = const Color(0xFFFFFFFF).withValues(alpha: 0.05)
       ..strokeWidth = 2.3;
     for (var i = 0; i < 5; i++) {
       final offset = (time * 90 + i * 120) % (size.height + 120);
@@ -875,7 +875,7 @@ class _ArenaBackdropPainter extends CustomPainter {
     }
 
     final hudPaint = Paint()
-      ..color = const Color(0xFFFB7185).withOpacity(0.08 + (wave - 1) * 0.01)
+      ..color = const Color(0xFFFB7185).withValues(alpha: 0.08 + (wave - 1) * 0.01)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2;
     canvas.drawRRect(
@@ -924,15 +924,15 @@ class _TargetSprite extends StatelessWidget {
             shape: BoxShape.circle,
             gradient: RadialGradient(
               colors: [
-                Colors.white.withOpacity(0.96),
-                glowColor.withOpacity(0.96),
+                Colors.white.withValues(alpha: 0.96),
+                glowColor.withValues(alpha: 0.96),
                 const Color(0xFF111827),
               ],
               stops: const [0.0, 0.38, 1.0],
             ),
             boxShadow: [
               BoxShadow(
-                color: glowColor.withOpacity(0.35),
+                color: glowColor.withValues(alpha: 0.35),
                 blurRadius: 18,
                 spreadRadius: 2,
               ),
@@ -945,7 +945,7 @@ class _TargetSprite extends StatelessWidget {
                 margin: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white.withOpacity(0.5), width: 2),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.5), width: 2),
                 ),
               ),
               Container(
@@ -953,8 +953,8 @@ class _TargetSprite extends StatelessWidget {
                 height: target.kind == _TargetKind.armor ? 34 : 28,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: const Color(0xFF05070B).withOpacity(0.72),
-                  border: Border.all(color: Colors.white.withOpacity(0.8), width: 2),
+                  color: const Color(0xFF05070B).withValues(alpha: 0.72),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.8), width: 2),
                 ),
                 child: Icon(
                   switch (target.kind) {
@@ -973,7 +973,7 @@ class _TargetSprite extends StatelessWidget {
                     width: 8,
                     height: 8,
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.85),
+                      color: Colors.white.withValues(alpha: 0.85),
                       shape: BoxShape.circle,
                     ),
                   ),
@@ -1012,10 +1012,10 @@ class _CrosshairPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
     final strokePaint = Paint()
-      ..color = color.withOpacity(0.95)
+      ..color = color.withValues(alpha: 0.95)
       ..strokeWidth = 2
       ..style = PaintingStyle.stroke;
-    final fillPaint = Paint()..color = color.withOpacity(0.95);
+    final fillPaint = Paint()..color = color.withValues(alpha: 0.95);
     canvas.drawCircle(center, 16, strokePaint);
     canvas.drawCircle(center, 4, fillPaint);
     canvas.drawLine(center.translate(-30, 0), center.translate(-12, 0), strokePaint);
@@ -1067,7 +1067,7 @@ class _ProgressLine extends StatelessWidget {
           child: LinearProgressIndicator(
             minHeight: 8,
             value: pct,
-            backgroundColor: Colors.white.withOpacity(0.08),
+            backgroundColor: Colors.white.withValues(alpha: 0.08),
             valueColor: AlwaysStoppedAnimation<Color>(color),
           ),
         ),
@@ -1092,9 +1092,9 @@ class _HudChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFF07111C).withOpacity(0.9),
+        color: const Color(0xFF07111C).withValues(alpha: 0.9),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: accent.withOpacity(0.35)),
+        border: Border.all(color: accent.withValues(alpha: 0.35)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -1102,7 +1102,7 @@ class _HudChip extends StatelessWidget {
           Text(
             label,
             style: TextStyle(
-              color: accent.withOpacity(0.9),
+              color: accent.withValues(alpha: 0.9),
               fontSize: 11,
               fontWeight: FontWeight.w700,
               letterSpacing: 1.0,
@@ -1159,9 +1159,9 @@ class _StatCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF07111C).withOpacity(0.76),
+        color: const Color(0xFF07111C).withValues(alpha: 0.76),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withOpacity(0.06)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

@@ -321,9 +321,9 @@ class _FlagCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface.withOpacity(0.9),
+        color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.9),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.5)),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.5)),
       ),
       child: Row(
         children: [
@@ -388,9 +388,9 @@ class _AudioFlagCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface.withOpacity(0.92),
+        color: theme.colorScheme.surface.withValues(alpha: 0.92),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: theme.colorScheme.outlineVariant.withOpacity(0.5)),
+        border: Border.all(color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -463,7 +463,7 @@ class _AudioToggleRow extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF0A1626),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: accent.withOpacity(0.22)),
+        border: Border.all(color: accent.withValues(alpha: 0.22)),
       ),
       child: Row(
         children: [
@@ -471,7 +471,7 @@ class _AudioToggleRow extends StatelessWidget {
             width: 42,
             height: 42,
             decoration: BoxDecoration(
-              color: accent.withOpacity(0.18),
+              color: accent.withValues(alpha: 0.18),
               borderRadius: BorderRadius.circular(14),
             ),
             child: Icon(icon, color: accent),

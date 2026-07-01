@@ -305,9 +305,9 @@ class _ProfileCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface.withOpacity(0.9),
+        color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.9),
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.5)),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.5)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -374,7 +374,7 @@ class _AvatarPreview extends StatelessWidget {
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         color: colorScheme.primaryContainer,
-        border: Border.all(color: colorScheme.outlineVariant.withOpacity(0.5)),
+        border: Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.5)),
       ),
       clipBehavior: Clip.antiAlias,
       child: content,

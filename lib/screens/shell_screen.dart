@@ -74,7 +74,7 @@ class _ShellScreenState extends State<ShellScreen> {
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.surface.withOpacity(0.88),
+        backgroundColor: Theme.of(context).colorScheme.surface.withValues(alpha: 0.88),
         elevation: 0,
         surfaceTintColor: Colors.transparent,
         title: Text(title),
@@ -141,7 +141,7 @@ class _Sidebar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: 220,
-      color: Theme.of(context).colorScheme.surface.withOpacity(0.92),
+      color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.92),
       padding: const EdgeInsets.symmetric(vertical: 16),
       child: NavigationRail(
         selectedIndex: index,
