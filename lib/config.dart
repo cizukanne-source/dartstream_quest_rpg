@@ -8,7 +8,7 @@ import 'package:dartstream_client/dartstream_client.dart';
 /// Build-time defines can override the Firebase API key and any service hosts.
 class AppConfig {
   static const _defaultFirebaseApiKey = '';
-  static const _defaultGoogleClientId = '';
+  static const _defaultGoogleOAuthClientId = '';
 
   static const _defaultAuthHost = 'https://dev-apiauth.dartstream.io';
   static const _defaultPlatformHost = 'https://dev-apiplatform.dartstream.io';
@@ -26,15 +26,26 @@ class AppConfig {
 
   static bool get hasFirebaseApiKey => firebaseApiKey.isNotEmpty;
 
-  static String get googleClientId {
+  static String get googleOAuthClientId {
     final buildTimeClientId =
+        const String.fromEnvironment('GOOGLE_OAUTH_CLIENT_ID').trim();
+    if (buildTimeClientId.isNotEmpty) {
+      return buildTimeClientId;
+    }
+    final legacyBuildTimeClientId =
         const String.fromEnvironment('GOOGLE_CLIENT_ID').trim();
-    return buildTimeClientId.isNotEmpty
-        ? buildTimeClientId
-        : _defaultGoogleClientId;
+    return legacyBuildTimeClientId.isNotEmpty
+        ? legacyBuildTimeClientId
+        : _defaultGoogleOAuthClientId;
   }
 
-  static bool get hasGoogleClientId => googleClientId.isNotEmpty;
+  static bool get hasGoogleSignIn => googleOAuthClientId.isNotEmpty;
+
+  /// Backwards-compatible alias for older call sites.
+  static String get googleClientId => googleOAuthClientId;
+
+  /// Backwards-compatible alias for older call sites.
+  static bool get hasGoogleClientId => hasGoogleSignIn;
 
   static String get authHost {
     final override = const String.fromEnvironment('API_AUTH').trim();

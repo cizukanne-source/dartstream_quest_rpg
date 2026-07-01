@@ -1,8 +1,5 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 
 import '../config.dart';
 import '../state/session.dart';
@@ -20,57 +17,16 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final GoogleSignIn _googleSignIn = GoogleSignIn.instance;
   final _email = TextEditingController();
   final _password = TextEditingController();
   final _confirm = TextEditingController();
   final _displayName = TextEditingController();
-  StreamSubscription<GoogleSignInAuthenticationEvent>? _googleAuthSubscription;
 
   AuthMode _mode = AuthMode.signUp;
   String? _localError;
-  String? _googleInitError;
-  bool _googleBusy = false;
-  bool _googleReady = false;
-
-  @override
-  void initState() {
-    super.initState();
-    unawaited(_initializeGoogleSignIn());
-  }
-
-  Future<void> _initializeGoogleSignIn() async {
-    try {
-      await _googleSignIn.initialize(
-        clientId: AppConfig.googleClientId.isEmpty ? null : AppConfig.googleClientId,
-      );
-      _googleAuthSubscription = _googleSignIn.authenticationEvents.listen(
-        _handleGoogleAuthenticationEvent,
-        onError: _handleGoogleAuthenticationError,
-      );
-      if (kIsWeb) {
-        _googleSignIn.attemptLightweightAuthentication();
-      }
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _googleReady = true;
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _googleReady = false;
-        _googleInitError = _googleErrorMessage(error);
-      });
-    }
-  }
 
   @override
   void dispose() {
-    unawaited(_googleAuthSubscription?.cancel());
     _email.dispose();
     _password.dispose();
     _confirm.dispose();
@@ -85,84 +41,6 @@ class _LoginScreenState extends State<LoginScreen> {
       _mode = mode;
       _localError = null;
     });
-  }
-
-  Future<void> _handleGoogleAuthenticationEvent(
-    GoogleSignInAuthenticationEvent event,
-  ) async {
-    if (!mounted || !kIsWeb) {
-      return;
-    }
-
-    switch (event) {
-      case GoogleSignInAuthenticationEventSignIn(user: final user):
-        await _completeGoogleSignIn(user);
-      case GoogleSignInAuthenticationEventSignOut():
-        break;
-    }
-  }
-
-  Future<void> _handleGoogleAuthenticationError(Object error) async {
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _googleBusy = false;
-      _googleInitError = _googleErrorMessage(error);
-    });
-  }
-
-  Future<void> _startGoogleSignIn() async {
-    if (_googleBusy || widget.session.status == SessionStatus.signingIn) {
-      return;
-    }
-    if (kIsWeb) {
-      return;
-    }
-
-    setState(() {
-      _googleBusy = true;
-      _localError = null;
-    });
-
-    try {
-      final account = await _googleSignIn.authenticate();
-      await _completeGoogleSignIn(account);
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _googleBusy = false;
-        _localError = _googleErrorMessage(error);
-      });
-    }
-  }
-
-  Future<void> _completeGoogleSignIn(GoogleSignInAccount account) async {
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _googleBusy = true;
-      _localError = null;
-    });
-
-    await widget.session.signInWithGoogleAccount(account);
-
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _googleBusy = false;
-    });
-  }
-
-  String _googleErrorMessage(Object error) {
-    if (error is GoogleSignInException) {
-      return error.description ?? error.toString();
-    }
-    return error.toString();
   }
 
   String? _validate() {
@@ -203,8 +81,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final busy = widget.session.status == SessionStatus.signingIn || _googleBusy;
-    final error = _localError ?? widget.session.errorMessage ?? _googleInitError;
+    final busy = widget.session.status == SessionStatus.signingIn;
+    final error = _localError ?? widget.session.errorMessage;
+    final showGoogleSignIn = kIsWeb && AppConfig.hasGoogleSignIn;
 
     return Scaffold(
       body: Container(
@@ -225,7 +104,7 @@ class _LoginScreenState extends State<LoginScreen> {
               constraints: const BoxConstraints(maxWidth: 640),
               child: Padding(
                 padding: const EdgeInsets.all(24),
-                child: _formPanel(context, busy, error),
+                child: _formPanel(context, busy, error, showGoogleSignIn),
               ),
             ),
           ),
@@ -238,6 +117,7 @@ class _LoginScreenState extends State<LoginScreen> {
     BuildContext context,
     bool busy,
     String? error,
+    bool showGoogleSignIn,
   ) {
     return Container(
       decoration: BoxDecoration(
@@ -360,12 +240,14 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          googleSignInButton(
-            enabled: !busy,
-            ready: _googleReady || !kIsWeb,
-            onPressed: _startGoogleSignIn,
-          ),
+          if (showGoogleSignIn) ...[
+            const SizedBox(height: 12),
+            googleSignInButton(
+              enabled: !busy && AppConfig.hasFirebaseApiKey,
+              ready: true,
+              onPressed: () => widget.session.signInWithGoogle(),
+            ),
+          ],
           if (error != null) ...[
             const SizedBox(height: 12),
             _ErrorBanner(message: error),

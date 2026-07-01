@@ -45,7 +45,7 @@ To enable Google sign-in, add a Google OAuth client ID as well:
 ```sh
 flutter run -d chrome --web-port=3000 \
   --dart-define=FIREBASE_API_KEY=your_web_key_here \
-  --dart-define=GOOGLE_CLIENT_ID=your_google_oauth_client_id.apps.googleusercontent.com
+  --dart-define=GOOGLE_OAUTH_CLIENT_ID=your_google_oauth_client_id.apps.googleusercontent.com
 ```
 
 To build the production web bundle:
@@ -68,7 +68,7 @@ firebase deploy --only hosting
 Required / optional build defines:
 
 - `FIREBASE_API_KEY` required for Firebase email/password auth in the web app
-- `GOOGLE_CLIENT_ID` optional for Google sign-in on web and native platforms
+- `GOOGLE_OAUTH_CLIENT_ID` optional for Google sign-in on the web build
 - `API_AUTH` optional override for the auth service
 - `API_PLATFORM` optional override for the platform service
 - `API_EXPERIENCE` optional override for the experience service
@@ -216,8 +216,7 @@ create preview URLs automatically for feature branches / pull requests.
 
 For a Firebase preview or live Hosting deployment, make sure the web bundle was
 built with the Firebase and Google sign-in defines above. If the Google client
-ID is omitted, the Google button will fall back to the `web/index.html` meta
-tag instead.
+ID is omitted, the Google button is hidden.
 
 The GitHub Actions deploy job also expects these secrets so the hosted build
 gets the same IntelliToggle configuration as local runs. If any of them are

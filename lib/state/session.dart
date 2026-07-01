@@ -4,10 +4,10 @@ import 'dart:typed_data';
 
 import 'package:dartstream_client/dartstream_client.dart';
 import 'package:flutter/material.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../auth/google_auth.dart';
 import '../config.dart';
 
 enum SessionStatus { signedOut, signingIn, signedIn, error }
@@ -33,48 +33,27 @@ class Session extends ChangeNotifier {
   Future<void> signIn(String email, String password, {String? displayName}) =>
       _authenticate(email, password, signUp: false, displayName: displayName);
 
-  Future<void> signInWithGoogleAccount(GoogleSignInAccount account) async {
-    status = SessionStatus.signingIn;
-    errorMessage = null;
-    notifyListeners();
-
-    try {
-      final idToken = account.authentication.idToken;
-      if (idToken == null || idToken.isEmpty) {
-        throw StateError('Google sign-in did not return an ID token.');
-      }
-
-      final client = DartStreamClient(config: AppConfig.dartStreamConfig);
-      final session = await client.auth.onboardProviderIdToken(
-        provider: DartStreamAuthProvider.google,
-        firebaseIdToken: idToken,
-      );
-
-      await _applySignedInConnection(
-        DartStreamConnection(
+  /// Federated sign-in with Google (web only). Obtains a Firebase ID token via
+  /// Google Identity Services + Identity Toolkit, then onboards a DartStream
+  /// session through the SDK's provider path.
+  Future<void> signInWithGoogle() => _authenticateConnection(() async {
+        if (AppConfig.firebaseApiKey.isEmpty) {
+          throw StateError('Firebase API key is required for Google sign-in.');
+        }
+        final firebaseIdToken = await signInWithGoogleFirebaseIdToken(
+          clientId: AppConfig.googleOAuthClientId,
+          firebaseApiKey: AppConfig.firebaseApiKey,
+        );
+        final client = DartStreamClient(config: AppConfig.dartStreamConfig);
+        final session = await client.auth.onboardProviderIdToken(
+          provider: DartStreamAuthProvider.google,
+          firebaseIdToken: firebaseIdToken,
+        );
+        return DartStreamConnection(
           client: client.withSession(session),
           session: session,
-        ),
-        emailOverride: account.email,
-        displayName: account.displayName,
-        photoUrl: account.photoUrl,
-      );
-    } on DartStreamFirebaseAuthException catch (error) {
-      status = SessionStatus.error;
-      errorMessage = error.message;
-    } on DartStreamApiException catch (error) {
-      status = SessionStatus.error;
-      errorMessage = _friendlyApiError(error);
-    } on StateError catch (error) {
-      status = SessionStatus.error;
-      errorMessage = error.message;
-    } catch (error) {
-      status = SessionStatus.error;
-      errorMessage = error.toString();
-    }
-
-    notifyListeners();
-  }
+        );
+      });
 
   DartStreamClient? get client => connection?.client;
 
@@ -161,6 +140,33 @@ class Session extends ChangeNotifier {
       if (signUp && displayName != null && displayName.trim().isNotEmpty) {
         await updateDisplayName(displayName.trim());
       }
+    } on DartStreamFirebaseAuthException catch (error) {
+      status = SessionStatus.error;
+      errorMessage = error.message;
+    } on DartStreamApiException catch (error) {
+      status = SessionStatus.error;
+      errorMessage = _friendlyApiError(error);
+    } on StateError catch (error) {
+      status = SessionStatus.error;
+      errorMessage = error.message;
+    } catch (error) {
+      status = SessionStatus.error;
+      errorMessage = error.toString();
+    }
+
+    notifyListeners();
+  }
+
+  Future<void> _authenticateConnection(
+    Future<DartStreamConnection> Function() connect,
+  ) async {
+    status = SessionStatus.signingIn;
+    errorMessage = null;
+    notifyListeners();
+
+    try {
+      final connection = await connect();
+      await _applySignedInConnection(connection);
     } on DartStreamFirebaseAuthException catch (error) {
       status = SessionStatus.error;
       errorMessage = error.message;
