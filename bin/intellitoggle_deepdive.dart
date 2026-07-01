@@ -1,8 +1,6 @@
-// ignore_for_file: avoid_print
-
 // IntelliToggle deep-dive: exercises Aortem's feature-flag SaaS the way the
-// Flutter client does through the standard OpenFeature provider. Unlike the
-// other deep-dives there is no Firebase end-user login and no hand-written HTTP:
+// Flutter client does — through the standard OpenFeature provider. Unlike the
+// other deep-dives there is NO Firebase end-user login and NO hand-written HTTP:
 // the published `openfeature_provider_intellitoggle` provider performs the
 // OAuth2 client_credentials handshake (clientId + clientSecret + tenantId)
 // internally, and we evaluate flags via the OpenFeature API.
@@ -20,7 +18,7 @@
 //   INTELLITOGGLE_BOOL_FLAG / _STRING_FLAG / _INT_FLAG / _OBJECT_FLAG
 //   INTELLITOGGLE_TARGET_USER (targeting key; default deepdive-cli)
 //
-// The clientSecret is confidential - for backends / CLIs / CI only. The Flutter
+// The clientSecret is confidential — for backends / CLIs / CI only. The Flutter
 // client only carries it for a demo/sandbox tenant; production keeps
 // client-credentials server-side.
 
@@ -42,7 +40,7 @@ void main(List<String> args) async {
         'IntelliToggle dashboard and export it).');
   }
   if (clientSecret == null || clientSecret.isEmpty) {
-    _fatal('INTELLITOGGLE_CLIENT_SECRET not set (shown once at creation - '
+    _fatal('INTELLITOGGLE_CLIENT_SECRET not set (shown once at creation — '
         're-create the client if you lost it).');
   }
   if (tenantId == null || tenantId.isEmpty) {
@@ -64,8 +62,10 @@ void main(List<String> args) async {
   print('  auth model   : OAuth2 client_credentials, NO Firebase user');
   print('  targeting    : userId=$targetUser\n');
 
-  // setProvider() runs initialize(), which exchanges client_credentials for a
-  // token and tests the connection, so reaching READY proves OAuth succeeded.
+  // 1. Register the provider. setProvider() runs initialize(), which exchanges
+  //    client_credentials for a token and tests the connection — so reaching
+  //    ProviderState.READY is the proof that OAuth succeeded. A bad secret /
+  //    unreachable host lands in ERROR (fail-closed), never silently READY.
   final provider = IntelliToggleProvider(
     clientId: clientId,
     clientSecret: clientSecret,
@@ -89,7 +89,7 @@ void main(List<String> args) async {
   );
 
   if (provider.state != ProviderState.READY) {
-    print('\n[FAIL] provider not READY - cannot evaluate flags. Check the '
+    print('\n[FAIL] provider not READY — cannot evaluate flags. Check the '
         'client_credentials and INTELLITOGGLE_API_URL.');
     _summary();
     exit(1);
@@ -99,6 +99,9 @@ void main(List<String> args) async {
   OpenFeatureAPI()
       .setGlobalContext(OpenFeatureEvaluationContext({'userId': targetUser}));
 
+  // 2. Evaluate each flag type. A returned result (even a fail-safe default for
+  //    an unknown flag) means the evaluation path works; only a thrown error
+  //    fails. We print value + reason + variant + errorCode either way.
   await _check('getBooleanFlag("$boolFlag")', 'evaluate', () async {
     final r = await provider.getBooleanFlag(boolFlag, false);
     _dump(r);
@@ -123,6 +126,8 @@ void main(List<String> args) async {
     return true;
   });
 
+  // 3. Negative: a provider built with a deliberately wrong secret must NOT
+  //    reach READY — proves auth fails closed (no fail-open).
   await _check('register with a bad secret (expect NOT ready)', 'negative',
       () async {
     final bad = IntelliToggleProvider(
@@ -133,7 +138,7 @@ void main(List<String> args) async {
     );
     try {
       await OpenFeatureAPI().setProvider(bad);
-    } catch (_) {}
+    } catch (_) {/* expected */}
     print('   bad-secret provider state=${bad.state.name}');
     return bad.state != ProviderState.READY;
   });
@@ -196,7 +201,7 @@ void _summary() {
   final skip = _results.where((r) => r.pass == null).length;
   for (final r in _results) {
     final tag = r.pass == null ? 'SKIP' : (r.pass! ? 'PASS' : 'FAIL');
-    final nt = r.note != null ? '  - ${r.note}' : '';
+    final nt = r.note != null ? '  — ${r.note}' : '';
     print('  [$tag] ${r.group.padRight(10)} ${r.label}$nt');
   }
   print('  ---- $pass passed, $fail failed, $skip skipped ----');

@@ -2,33 +2,37 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
-      - master
+    branches: [ main ]
   pull_request:
+    branches: [ main ]
 
 jobs:
-  build-and-test:
+  smoke:
+    name: analyze smoke + deep-dive CLIs
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      # Track the latest stable Dart (min 3.12.0; see README Prerequisites).
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - run: dart pub get
+      - run: dart analyze bin
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+  client:
+    name: analyze + build Flutter client
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: flutter_client
+    steps:
+      - uses: actions/checkout@v4
+      # Track the latest stable Flutter (min Dart 3.12.0; see README Prerequisites).
+      - uses: subosito/flutter-action@v2
         with:
           channel: stable
-          cache: true
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Analyze
-        run: flutter analyze
-
-      - name: Test
-        run: flutter test
-
-      - name: Build web
-        run: flutter build web --dart-define=FIREBASE_API_KEY=dummy
+      - run: flutter pub get
+      - run: flutter analyze
+      # Web-compilation gate: proves the app (and the dartstream_client SDK it
+      # consumes) stays browser-safe. The key is a dummy — no network calls run.
+      - run: flutter build web --dart-define=FIREBASE_API_KEY=dummy

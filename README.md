@@ -59,12 +59,6 @@ flutter build web --release \
   --dart-define=INTELLITOGGLE_TENANT_ID=tenant_...
 ```
 
-To deploy to Firebase Hosting after building:
-
-```sh
-firebase deploy --only hosting
-```
-
 Required / optional build defines:
 
 - `FIREBASE_API_KEY` required for Firebase email/password auth in the web app
@@ -200,42 +194,46 @@ Run this when you want to confirm the OAuth2 client is still healthy:
 
 ## Firebase Hosting
 
-This repo includes Firebase Hosting config for the Flutter web output:
-
-- [`firebase.json`](firebase.json) serves `build/web`
-- [`.firebaserc`](.firebaserc) points the repo at the Firebase project that owns the Hosting site
-- `firebase.json` targets the Hosting site `sample-app-chukwuemeka-izukanne`
-- GitHub Actions creates preview URLs for branch pushes and pull requests, and deploys `main` to the live site
-
-For GitHub Actions deployment, add these secrets:
-
-- `FIREBASE_SERVICE_ACCOUNT_AORTEM_SAMPLE_APPS`
-
-Then the deploy workflow can publish the web bundle to the hosting site and
-create preview URLs automatically for feature branches / pull requests.
-
-For a Firebase preview or live Hosting deployment, make sure the web bundle was
-built with the Firebase and Google sign-in defines above. If the Google client
-ID is omitted, the Google button is hidden.
-
-The GitHub Actions deploy job also expects these secrets so the hosted build
-gets the same IntelliToggle configuration as local runs. If any of them are
-missing, the deployment now fails instead of publishing a bundle that only
-shows the IntelliToggle "not configured" screen:
-
-- `INTELLITOGGLE_API_URL`
-- `INTELLITOGGLE_CLIENT_ID`
-- `INTELLITOGGLE_CLIENT_SECRET`
-- `INTELLITOGGLE_TENANT_ID`
-- `FIREBASE_WEB_API_KEY`
+Unlike `dartstream_quest_rpg`, the sample app does not ship a Firebase Hosting
+deploy workflow or hosting config in-repo. To mirror that exact setup, this
+repo also keeps Firebase limited to client auth and backend wiring only.
 
 ## Project structure
 
-- `lib/config.dart` - backend host configuration and Firebase API key lookup
-- `lib/state/session.dart` - authentication and tenant state
-- `lib/screens/login_screen.dart` - create-account / sign-in UI
-- `lib/screens/home_screen.dart` - live RPG dashboard and backend panels
-- `bin/intellitoggle_deepdive.dart` - IntelliToggle OpenFeature deep-dive
+```text
+.
+├── bin/
+│   ├── auth_deepdive.dart
+│   ├── experience_deepdive.dart
+│   ├── intellitoggle_deepdive.dart
+│   ├── oauth2_deepdive.dart
+│   ├── persistence_deepdive.dart
+│   ├── platform_deepdive.dart
+│   ├── reactive_deepdive.dart
+│   └── smoke.dart
+├── flutter_client/
+│   ├── lib/
+│   │   ├── auth/
+│   │   ├── game/
+│   │   ├── intellitoggle/
+│   │   ├── screens/
+│   │   ├── state/
+│   │   ├── theme/
+│   │   └── widgets/
+│   ├── web/
+│   ├── analysis_options.yaml
+│   ├── pubspec.yaml
+│   └── README.md
+├── lib/
+│   ├── config.dart
+│   ├── main.dart
+│   └── ...
+└── README.md
+```
+
+The nested `flutter_client/` subtree mirrors the sample app layout from
+`dartstream-sample-app`, while the existing root `lib/` package remains the
+active Quest RPG app for now.
 
 ## Why this repo exists
 

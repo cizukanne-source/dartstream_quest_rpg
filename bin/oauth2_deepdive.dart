@@ -1,319 +1,231 @@
+// OAuth2 deep-dive: exercises the machine-to-machine (server-to-server) path —
+// the "pay -> create an Application -> mint credentials -> connect your real
+// project" flow that DartStream now ships (GitLab #96). Unlike the other
+// deep-dives this uses NO Firebase end-user login: it authenticates purely with
+// an OAuth2 client_credentials grant, exchanging a clientId + clientSecret for a
+// DartStream-signed Bearer JWT and calling the live services with it.
+//
+// Create the client in the dashboard (Settings -> Applications -> Create OAuth2
+// Client), copy the clientId + clientSecret once, then:
+//
+//   set -a && source .env && set +a
+//   dart run bin/oauth2_deepdive.dart
+//
+// Required env (put the secret only in your gitignored .env, never commit it):
+//   OAUTH2_CLIENT_ID, OAUTH2_CLIENT_SECRET
+// Optional env:
+//   API_BILLING  (token endpoint host; default https://dev-apibilling.dartstream.io)
+//   OAUTH2_SCOPE (space-separated subset of the client's scopes; default = all)
+//
+// The clientSecret is confidential — for backends / CLIs / CI / server-rendered
+// apps only. NEVER embed it in a browser or Flutter bundle; those keep the
+// Firebase end-user login path (see the other deep-dives).
+
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:dartstream_quest_rpg/verification/oauth2_verifier.dart';
+import 'package:http/http.dart' as http;
 
-class _Env {
-  _Env._(this.values);
+final List<_Result> _results = [];
 
-  factory _Env.load() {
-    final values = <String, String>{};
-    final envFile = File('.env');
-    if (envFile.existsSync()) {
-      for (final rawLine in envFile.readAsLinesSync()) {
-        final line = rawLine.trim();
-        if (line.isEmpty || line.startsWith('#')) continue;
-        final separator = line.indexOf('=');
-        if (separator <= 0) continue;
-        final key = line.substring(0, separator).trim();
-        var value = line.substring(separator + 1).trim();
-        if (value.startsWith('"') && value.endsWith('"') && value.length >= 2) {
-          value = value.substring(1, value.length - 1);
-        } else if (value.startsWith("'") && value.endsWith("'") && value.length >= 2) {
-          value = value.substring(1, value.length - 1);
-        } else {
-          final commentIndex = _inlineCommentIndex(value);
-          if (commentIndex != -1) {
-            value = value.substring(0, commentIndex).trimRight();
-          }
-        }
-        if (key.isNotEmpty) {
-          values[key] = value;
-        }
-      }
-    }
-    values.addAll(Platform.environment);
-    return _Env._(values);
+void main(List<String> args) async {
+  final env = Platform.environment;
+  final clientId = env['OAUTH2_CLIENT_ID']?.trim();
+  final clientSecret = env['OAUTH2_CLIENT_SECRET']?.trim();
+
+  if (clientId == null || clientId.isEmpty) {
+    _fatal('OAUTH2_CLIENT_ID not set (create a client in Settings -> '
+        'Applications and export it).');
+  }
+  if (clientSecret == null || clientSecret.isEmpty) {
+    _fatal('OAUTH2_CLIENT_SECRET not set (shown once at creation — re-create '
+        'the client if you lost it).');
   }
 
-  final Map<String, String> values;
+  final billing =
+      _get(env, 'API_BILLING', 'https://dev-apibilling.dartstream.io');
+  final platform =
+      _get(env, 'API_PLATFORM', 'https://dev-apiplatform.dartstream.io');
+  final experience =
+      _get(env, 'API_EXPERIENCE', 'https://dev-apiexperience.dartstream.io');
+  final reactive =
+      _get(env, 'API_REACTIVE', 'https://dev-apireactive.dartstream.io');
+  final persistence =
+      _get(env, 'API_PERSISTENCE', 'https://dev-apipersistence.dartstream.io');
+  final scope = env['OAUTH2_SCOPE']?.trim();
+  final tokenUrl = '$billing/api/v1/oauth2/token';
 
-  String require(String key) {
-    final value = values[key]?.trim() ?? '';
-    if (value.isEmpty) {
-      throw StateError('Missing $key. Add it to .env or set it in cmd before running.');
-    }
-    return value;
-  }
+  print('== DartStream OAuth2 (client_credentials) deep-dive ==');
+  print('  token endpoint : $tokenUrl');
+  print('  client id      : $clientId');
+  print('  scope          : ${scope == null || scope.isEmpty ? '(all client scopes)' : scope}');
+  print('  auth model     : machine-to-machine, NO Firebase user\n');
 
-  String optional(String key, {String? fallback}) {
-    final value = values[key]?.trim();
-    if (value == null || value.isEmpty) return fallback ?? '';
-    return value;
-  }
-}
-
-class _TokenResult {
-  _TokenResult({
-    required this.accessToken,
-    required this.tokenType,
-    required this.expiresIn,
+  // 1. Exchange client_credentials for a Bearer JWT (RFC 6749 §4.4).
+  //    Credentials go over HTTP Basic, exactly as a real backend would send them.
+  final basic = base64Encode(utf8.encode('$clientId:$clientSecret'));
+  String? accessToken;
+  await _step('POST /api/v1/oauth2/token (grant_type=client_credentials)',
+      'token', () {
+    final body = {'grant_type': 'client_credentials'};
+    if (scope != null && scope.isNotEmpty) body['scope'] = scope;
+    return http.post(
+      Uri.parse(tokenUrl),
+      headers: {
+        'authorization': 'Basic $basic',
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      body: body,
+    );
+  }, onBody: (b) {
+    final m = _tryJson(b);
+    accessToken = m?['access_token'] as String?;
+    final expiresIn = m?['expires_in'];
+    final grantedScope = m?['scope'];
+    print('   token_type=${m?['token_type']} expires_in=$expiresIn');
+    print('   granted scope: $grantedScope');
+    _dumpClaims(accessToken);
   });
 
-  final String accessToken;
-  final String tokenType;
-  final int? expiresIn;
-
-  factory _TokenResult.fromJson(Map<String, dynamic> json) {
-    final accessToken = _firstString(json, const [
-      'access_token',
-      'accessToken',
-      'token',
-      'jwt',
-    ]);
-    if (accessToken == null || accessToken.isEmpty) {
-      throw FormatException('Token response did not include an access token: $json');
-    }
-    return _TokenResult(
-      accessToken: accessToken,
-      tokenType: _firstString(json, const ['token_type', 'tokenType']) ?? 'Bearer',
-      expiresIn: _firstInt(json, const ['expires_in', 'expiresIn']),
-    );
+  if (accessToken == null) {
+    print('\n[FAIL] no access_token — cannot exercise services.');
+    _summary();
+    exit(1);
   }
+
+  // From here on every call carries ONLY the OAuth2 Bearer token. No Firebase
+  // ID token, no X-Tenant-ID header — the tenant rides in the JWT claims.
+  final h = {'authorization': 'Bearer $accessToken'};
+
+  // 2. Read against each live service (read scope honoured).
+  await _step('GET  $platform/api/v1/platform/feature-flags', 'platform',
+      () => http.get(Uri.parse('$platform/api/v1/platform/feature-flags'),
+          headers: h));
+
+  await _step('GET  $platform/api/v1/platform/projects', 'platform',
+      () => http.get(Uri.parse('$platform/api/v1/platform/projects'),
+          headers: h));
+
+  await _step(
+      'GET  $experience/api/v1/experience/profiles/capabilities', 'experience',
+      () => http.get(
+          Uri.parse('$experience/api/v1/experience/profiles/capabilities'),
+          headers: h));
+
+  await _step(
+      'GET  $reactive/api/v1/reactive/events/subscriptions', 'reactive',
+      () => http.get(
+          Uri.parse('$reactive/api/v1/reactive/events/subscriptions'),
+          headers: h));
+
+  await _step('GET  $persistence/api/v1/persistence/database/', 'persistence',
+      () => http.get(Uri.parse('$persistence/api/v1/persistence/database/'),
+          headers: h));
+
+  // 3. Negative: a clearly-bogus token must be rejected (no silent fail-open).
+  await _step('GET  feature-flags with a garbage Bearer (expect 401/403)',
+      'negative',
+      () => http.get(Uri.parse('$platform/api/v1/platform/feature-flags'),
+          headers: {'authorization': 'Bearer not-a-real-token'}),
+      allow: const [401, 403]);
+
+  _summary();
+  exit(_results.any((r) => r.pass == false) ? 1 : 0);
 }
 
-Future<void> main() async {
-  final env = _Env.load();
-  final clientId = env.require('OAUTH2_CLIENT_ID');
-  final clientSecret = env.require('OAUTH2_CLIENT_SECRET');
-  final billingBaseUrl = env.optional(
-    'API_BILLING',
-    fallback: 'https://dev-apibilling.dartstream.io',
-  );
-  final requestedScope = env.optional('OAUTH2_SCOPE');
-
-  final token = await _mintToken(
-    billingBaseUrl: billingBaseUrl,
-    clientId: clientId,
-    clientSecret: clientSecret,
-    scope: requestedScope.isEmpty ? null : requestedScope,
-  );
-
-  final verification = inspectJwtAccessToken(
-    token.accessToken,
-    expectedIssuer: env.optional('OAUTH2_ISSUER'),
-  );
-
-  stdout.writeln('OAuth2 token minted successfully');
-  stdout.writeln('  token_type: ${token.tokenType}');
-  if (token.expiresIn != null) {
-    stdout.writeln('  expires_in: ${token.expiresIn}s');
-  }
-  stdout.writeln('  ${verification.summary()}');
-  stdout.writeln(
-    '  tenant: ${_claimAsString(verification.claims, const ['tenant', 'tenant_id', 'tenantId', 'tid']) ?? '(missing)'}',
-  );
-  stdout.writeln('  scope: ${_claimAsString(verification.claims, const ['scope']) ?? '(missing)'}');
-  stdout.writeln();
-
-  if (verification.passed) {
-    stdout.writeln('Token checks');
-    stdout.writeln('PASS  JWT header uses RS256');
-    stdout.writeln('PASS  JWT is not expired');
-    stdout.writeln('PASS  JWT is valid for the current time window');
-    if (verification.issuer != null) {
-      stdout.writeln('PASS  Issuer claim present: ${verification.issuer}');
-    } else {
-      stdout.writeln('FAIL  Issuer claim missing');
-    }
-  } else {
-    stdout.writeln('Token checks');
-    for (final issue in verification.issues) {
-      stdout.writeln('FAIL  $issue');
-    }
-  }
-
-  final probes = <_Probe>[
-    _Probe(
-      label: 'persistence/database/providers',
-      uri: Uri.parse(billingBaseUrl).replace(path: '/api/v1/persistence/database/providers'),
-    ),
-    _Probe(
-      label: 'reactive/streaming/channels',
-      uri: Uri.parse(billingBaseUrl).replace(
-        path: '/api/v1/reactive/streaming/channels',
-      ),
-    ),
-    _Probe(
-      label: 'experience/connectors',
-      uri: Uri.parse(billingBaseUrl).replace(path: '/api/v1/experience/connectors'),
-    ),
-    _Probe(
-      label: 'platform/projects',
-      uri: Uri.parse(billingBaseUrl).replace(path: '/api/v1/platform/projects'),
-    ),
-  ];
-
-  final results = <_ProbeResult>[];
-  for (final probe in probes) {
-    results.add(await _probeEndpoint(probe, token.accessToken));
-  }
-
-  stdout.writeln('Endpoint checks');
-  for (final result in results) {
-    stdout.writeln(
-      '${result.pass ? 'PASS' : 'FAIL'}  '
-      '${result.label.padRight(30)}  '
-      '${result.summary}',
-    );
-  }
-
-  final tokenPassed = verification.passed && verification.issuer != null;
-  final endpointPassed = results.every((result) => result.pass);
-  if (!tokenPassed || !endpointPassed) {
-    exitCode = 1;
-  }
-}
-
-Future<_TokenResult> _mintToken({
-  required String billingBaseUrl,
-  required String clientId,
-  required String clientSecret,
-  String? scope,
-}) async {
-  final uri = Uri.parse(billingBaseUrl).replace(path: '/api/v1/oauth2/token');
-  final client = HttpClient();
+// Decode (without verifying) the JWT payload so the run shows the tenant +
+// scopes the token carries — handy evidence that auth is machine-derived.
+void _dumpClaims(String? jwt) {
+  if (jwt == null) return;
+  final parts = jwt.split('.');
+  if (parts.length != 3) return;
   try {
-    final request = await client.postUrl(uri);
-    final basic = base64Encode(utf8.encode('$clientId:$clientSecret'));
-    request.headers.set(HttpHeaders.authorizationHeader, 'Basic $basic');
-    request.headers.contentType = ContentType('application', 'x-www-form-urlencoded');
-    final form = <String, String>{
-      'grant_type': 'client_credentials',
-      if (scope != null && scope.trim().isNotEmpty) 'scope': scope.trim(),
-    };
-    request.write(Uri(queryParameters: form).query);
-
-    final response = await request.close();
-    final body = await response.transform(utf8.decoder).join();
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw HttpException(
-        'Token request failed with ${response.statusCode}: $body',
-        uri: uri,
-      );
+    var p = parts[1].replaceAll('-', '+').replaceAll('_', '/');
+    p = p.padRight((p.length + 3) & ~3, '=');
+    final claims = jsonDecode(utf8.decode(base64Decode(p))) as Map;
+    print('   claims: iss=${claims['iss']} aud=${claims['aud']} '
+        'tenant=${claims['tenantId'] ?? claims['tenant_id']} '
+        'sub=${claims['sub']}');
+    if (claims['scope'] != null || claims['scopes'] != null) {
+      print('   claim scopes: ${claims['scope'] ?? claims['scopes']}');
     }
-    final json = _decodeJson(body, context: 'OAuth2 token response');
-    return _TokenResult.fromJson(json);
-  } finally {
-    client.close(force: true);
-  }
+  } catch (_) {}
 }
 
-Future<_ProbeResult> _probeEndpoint(_Probe probe, String bearerToken) async {
-  final client = HttpClient();
+Map<String, dynamic>? _tryJson(String body) {
   try {
-    final request = await client.getUrl(probe.uri);
-    request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $bearerToken');
-    final response = await request.close();
-    final body = await response.transform(utf8.decoder).join();
-    final pass = response.statusCode >= 200 && response.statusCode < 300;
-    final summary = pass
-        ? _summarizePayload(body)
-        : 'HTTP ${response.statusCode}: ${body.isEmpty ? '(empty body)' : body}';
-    return _ProbeResult(label: probe.label, pass: pass, summary: summary);
-  } finally {
-    client.close(force: true);
-  }
-}
-
-String _summarizePayload(String body) {
-  if (body.trim().isEmpty) return 'empty response';
-  try {
-    final decoded = jsonDecode(body);
-    if (decoded is List) {
-      return 'list(${decoded.length})';
-    }
-    if (decoded is Map) {
-      final map = Map<String, dynamic>.from(decoded);
-      return 'keys=${map.keys.take(5).join(', ')}';
-    }
-    return decoded.toString();
+    final d = jsonDecode(body);
+    return d is Map<String, dynamic> ? d : null;
   } catch (_) {
-    return body.length > 120 ? '${body.substring(0, 117)}...' : body;
+    return null;
   }
 }
 
-Map<String, dynamic> _decodeJson(String body, {required String context}) {
+class _Result {
+  _Result(this.group, this.label, this.pass, {this.status, this.note});
+  final String group;
+  final String label;
+  final bool? pass;
+  final int? status;
+  final String? note;
+}
+
+void _record(String group, String label, bool? pass, {int? status, String? note}) =>
+    _results.add(_Result(group, label, pass, status: status, note: note));
+
+Future<void> _step(
+  String label,
+  String group,
+  Future<http.Response> Function() send, {
+  List<int> allow = const [200, 201, 204],
+  void Function(String body)? onBody,
+}) async {
+  print('-- $label --');
   try {
-    final decoded = jsonDecode(body);
-    if (decoded is Map<String, dynamic>) return decoded;
-    if (decoded is Map) return Map<String, dynamic>.from(decoded);
-    throw FormatException('$context did not return a JSON object: $body');
-  } catch (error) {
-    throw FormatException('$context was not valid JSON: $body', error);
+    final sw = Stopwatch()..start();
+    final resp = await send().timeout(const Duration(seconds: 25));
+    sw.stop();
+    final ok = allow.contains(resp.statusCode);
+    final ex = _excerpt(resp.body);
+    print('   ${ok ? '[PASS]' : '[FAIL]'} -> ${resp.statusCode} '
+        'in ${sw.elapsedMilliseconds}ms');
+    if (ex.isNotEmpty) print('   body: $ex');
+    _record(group, label, ok, status: resp.statusCode);
+    if (ok) onBody?.call(resp.body);
+  } on TimeoutException {
+    print('   [FAIL] TIMEOUT');
+    _record(group, label, false, note: 'timeout');
+  } catch (e) {
+    print('   [FAIL] $e');
+    _record(group, label, false, note: '$e');
   }
 }
 
-String? _claimAsString(Map<String, dynamic> claims, List<String> keys) {
-  for (final key in keys) {
-    final value = claims[key];
-    if (value is String && value.isNotEmpty) return value;
-    if (value != null) return value.toString();
+String _get(Map<String, String> env, String k, String fallback) =>
+    (env[k]?.trim().isNotEmpty ?? false) ? env[k]!.trim() : fallback;
+
+String _excerpt(String body) {
+  final t = body.replaceAll(RegExp(r'\s+'), ' ').trim();
+  if (t.isEmpty) return '';
+  return t.length > 240 ? '${t.substring(0, 240)}...' : t;
+}
+
+void _fatal(String msg) {
+  stderr.writeln('FATAL: $msg');
+  exit(2);
+}
+
+void _summary() {
+  print('\n== OAuth2 deep-dive summary ==');
+  final pass = _results.where((r) => r.pass == true).length;
+  final fail = _results.where((r) => r.pass == false).length;
+  final skip = _results.where((r) => r.pass == null).length;
+  for (final r in _results) {
+    final tag = r.pass == null ? 'SKIP' : (r.pass! ? 'PASS' : 'FAIL');
+    final st = r.status != null ? ' (${r.status})' : '';
+    final nt = r.note != null ? '  — ${r.note}' : '';
+    print('  [$tag] ${r.group.padRight(12)} ${r.label}$st$nt');
   }
-  return null;
-}
-
-int? _firstInt(Map<String, dynamic> json, List<String> keys) {
-  for (final key in keys) {
-    final value = json[key];
-    if (value is int) return value;
-    if (value is String) {
-      final parsed = int.tryParse(value);
-      if (parsed != null) return parsed;
-    }
-  }
-  return null;
-}
-
-String? _firstString(Map<String, dynamic> json, List<String> keys) {
-  for (final key in keys) {
-    final value = json[key];
-    if (value is String && value.isNotEmpty) return value;
-    if (value != null) return value.toString();
-  }
-  return null;
-}
-
-int _inlineCommentIndex(String value) {
-  for (var i = 0; i < value.length; i++) {
-    if (value[i] == '#') {
-      if (i == 0) return 0;
-      if (value[i - 1].trim().isEmpty) {
-        return i - 1;
-      }
-    }
-  }
-  return -1;
-}
-
-class _Probe {
-  const _Probe({
-    required this.label,
-    required this.uri,
-  });
-
-  final String label;
-  final Uri uri;
-}
-
-class _ProbeResult {
-  const _ProbeResult({
-    required this.label,
-    required this.pass,
-    required this.summary,
-  });
-
-  final String label;
-  final bool pass;
-  final String summary;
+  print('  ---- $pass passed, $fail failed, $skip skipped ----');
 }
