@@ -12,11 +12,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Track the latest stable Dart (min 3.12.0; see README Prerequisites).
-      - uses: dart-lang/setup-dart@v1
+      # Track the latest stable Flutter (includes the Dart SDK needed by flutter_test).
+      - uses: subosito/flutter-action@v2
         with:
-          sdk: stable
-      - run: dart pub get
+          channel: stable
+      - run: flutter pub get
       - run: dart analyze bin
 
   client:
