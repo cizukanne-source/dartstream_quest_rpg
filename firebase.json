@@ -1,0 +1,17 @@
+{
+  "hosting": {
+    "site": "sample-app-chukwuemeka-izukanne",
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}

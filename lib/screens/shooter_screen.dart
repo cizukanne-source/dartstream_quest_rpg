@@ -18,7 +18,7 @@ class ShooterScreen extends StatefulWidget {
 }
 
 class _ShooterScreenState extends State<ShooterScreen>
-    with TickerProviderStateMixin {
+    with SingleTickerProviderStateMixin {
   final Random _rng = Random();
   late final Ticker _ticker;
 
@@ -26,21 +26,39 @@ class _ShooterScreenState extends State<ShooterScreen>
   Size _arenaSize = Size.zero;
   Offset _aimPosition = Offset.zero;
 
-  final List<_Target> _targets = [];
+  final List<_Zombie> _zombies = [];
   final List<_Impact> _impacts = [];
+  final List<_Pickup> _pickups = [];
+  final List<_Corpse> _corpses = [];
+  final _ZombieSpatialGrid _zombieGrid = _ZombieSpatialGrid(cellSize: 180);
 
   double _health = 100;
-  int _score = 0;
+  double _maxHealth = 100;
+  double _bulletDamage = 40;
+  double _reloadDuration = 0.9;
+  double _aimMoveMultiplier = 1.0;
+  double _pickupRadius = 120;
+  int _bulletPenetration = 0;
+  int _zombiesDefeated = 0;
+  int _coins = 0;
+  int _xp = 0;
+  int _level = 1;
+  int _xpToNextLevel = 50;
   int _combo = 0;
   int _ammo = 12;
   int _reserveAmmo = 72;
   int _wave = 1;
+  int _highestWave = 1;
+  double _survivalClock = 0;
   double _spawnClock = 0;
   double _reloadClock = 0;
   double _bannerClock = 0;
   bool _reloading = false;
   bool _paused = false;
   bool _gameOver = false;
+  bool _bossSpawned = false;
+  bool _levelUpActive = false;
+  List<_UpgradeChoice> _pendingUpgrades = const [];
   String? _banner;
 
   Offset _defaultAimPosition(Size size) => Offset(size.width / 2, size.height / 2);
@@ -49,7 +67,7 @@ class _ShooterScreenState extends State<ShooterScreen>
     if (_arenaSize == Size.zero) {
       return position;
     }
-    const padding = 46.0;
+    const padding = 44.0;
     return Offset(
       position.dx.clamp(padding, _arenaSize.width - padding),
       position.dy.clamp(padding, _arenaSize.height - padding),
@@ -74,7 +92,7 @@ class _ShooterScreenState extends State<ShooterScreen>
   }
 
   void _moveAimBy(Offset delta) {
-    _setAimPosition(_currentAimPosition + delta);
+    _setAimPosition(_currentAimPosition + (delta * _aimMoveMultiplier));
   }
 
   void _moveAimTo(Offset position) {
@@ -109,10 +127,41 @@ class _ShooterScreenState extends State<ShooterScreen>
 
   void _step(double dt) {
     _bannerClock = max(0, _bannerClock - dt);
+
     _impacts.removeWhere((impact) {
       impact.life -= dt;
+      impact.position += impact.velocity * dt;
+      impact.rotation += impact.rotationSpeed * dt;
       return impact.life <= 0;
     });
+    if (_impacts.length > 160) {
+      _impacts.removeRange(0, _impacts.length - 160);
+    }
+
+    final player = _currentAimPosition;
+    _pickups.removeWhere((pickup) {
+      pickup.life -= dt;
+      if (pickup.life <= 0) {
+        return true;
+      }
+      final collected = (pickup.position - player).distance <= _pickupRadius + pickup.radius;
+      if (collected) {
+        _health = min(_maxHealth, _health + pickup.healAmount);
+        _flashBanner('+${pickup.healAmount.toInt()} HP');
+        unawaited(GameAudioService.instance.playHitCue());
+      }
+      return collected;
+    });
+
+    _corpses.removeWhere((corpse) {
+      corpse.life -= dt;
+      corpse.wobble += dt * corpse.wobbleSpeed;
+      final visibleBounds = Rect.fromLTWH(-220, -220, _arenaSize.width + 440, _arenaSize.height + 440);
+      return corpse.life <= 0 || !visibleBounds.contains(corpse.position);
+    });
+    if (_corpses.length > 80) {
+      _corpses.removeRange(0, _corpses.length - 80);
+    }
 
     if (_reloading) {
       _reloadClock -= dt;
@@ -125,66 +174,166 @@ class _ShooterScreenState extends State<ShooterScreen>
       return;
     }
 
+    _survivalClock += dt;
+    final nextWave = max(1, 1 + (_survivalClock ~/ 20));
+    if (nextWave != _wave) {
+      _wave = nextWave;
+      _highestWave = max(_highestWave, _wave);
+      _flashBanner('Wave $_wave');
+      unawaited(GameAudioService.instance.playCue(GameAudioCue.fire));
+    } else {
+      _wave = nextWave;
+      _highestWave = max(_highestWave, _wave);
+    }
+
+    if (_survivalClock >= 90 && !_bossSpawned) {
+      _spawnBossZombie();
+      _bossSpawned = true;
+      _flashBanner('Boss zombie!');
+    }
+
     _spawnClock += dt;
-    final spawnInterval = max(0.48, 1.15 - ((_wave - 1) * 0.05));
+    final spawnInterval = _balancedSpawnInterval();
+    final spawnBurst = 1 + min(3, (_wave - 1) ~/ 3);
     while (_spawnClock >= spawnInterval) {
       _spawnClock -= spawnInterval;
-      _spawnTarget();
-      if (_wave >= 4 && _rng.nextBool()) {
-        _spawnTarget();
+      for (var i = 0; i < spawnBurst; i++) {
+        _spawnZombie();
       }
     }
 
-    final nextTargets = <_Target>[];
-    for (final target in _targets) {
-      target.depth -= target.speed * dt;
-      target.sway += target.drift * dt;
-      if (target.depth <= 0.04) {
-        _health = max(0, _health - target.damage);
-        _combo = 0;
-        _flashBanner('Target breached -${target.damage.toInt()} HP');
-        continue;
+    final nextZombies = <_Zombie>[];
+
+    for (final zombie in _zombies) {
+      final toPlayer = player - zombie.position;
+      final distance = toPlayer.distance;
+      final attackRadius = zombie.radius * 1.15;
+      if (zombie.kind == _ZombieKind.boss) {
+        zombie.specialClock += dt;
+        if (zombie.isCharging) {
+          zombie.chargeClock -= dt;
+          final chargeStep = zombie.speed * 3.4 * dt;
+          zombie.position += Offset(
+            zombie.chargeDirection.dx * chargeStep,
+            zombie.chargeDirection.dy * chargeStep,
+          );
+          if (zombie.chargeClock <= 0) {
+            zombie.isCharging = false;
+            zombie.specialClock = 0;
+          }
+        } else {
+          final shouldCharge = zombie.specialClock >= 3.5 && distance < 520 && distance > 120;
+          if (shouldCharge && distance > 0) {
+            zombie.isCharging = true;
+            zombie.chargeClock = 0.8;
+            zombie.chargeDirection = Offset(toPlayer.dx / distance, toPlayer.dy / distance);
+            _flashBanner('Boss charge');
+          } else if (distance > 0 && distance > attackRadius) {
+            final step = zombie.speed * dt;
+            final direction = Offset(toPlayer.dx / distance, toPlayer.dy / distance);
+            zombie.position += Offset(direction.dx * step, direction.dy * step);
+          }
+        }
+      } else if (distance > 0 && distance > attackRadius) {
+        final step = zombie.speed * dt;
+        final direction = Offset(toPlayer.dx / distance, toPlayer.dy / distance);
+        zombie.position += Offset(direction.dx * step, direction.dy * step);
       }
-      nextTargets.add(target);
+
+      zombie.wobble += dt * zombie.wobbleSpeed;
+
+      final attackMultiplier = zombie.kind == _ZombieKind.boss && zombie.isCharging ? 2.2 : 1.0;
+      if (distance <= attackRadius) {
+        _health = max(0, _health - (zombie.damagePerSecond * attackMultiplier * dt));
+      }
+
+      nextZombies.add(zombie);
     }
-    _targets
+
+    _zombies
       ..clear()
-      ..addAll(nextTargets);
-
-    _wave = max(1, 1 + (_score ~/ 220));
+      ..addAll(nextZombies.where((zombie) => zombie.health > 0));
+    _rebuildZombieGrid();
 
     if (_health <= 0) {
       _health = 0;
       _gameOver = true;
       _paused = true;
-      _flashBanner('Mission failed');
+      _flashBanner('Overrun');
       unawaited(GameAudioService.instance.playRoundEndCue(victory: false));
     }
   }
 
-  void _spawnTarget() {
-    final lanes = [-0.85, -0.48, -0.12, 0.22, 0.56, 0.9];
-    final lane = lanes[_rng.nextInt(lanes.length)];
-    final depth = 1.0 + (_rng.nextDouble() * 0.2);
-    final kindRoll = _rng.nextDouble();
-    final kind = kindRoll < 0.55
-        ? _TargetKind.drone
-        : kindRoll < 0.82
-            ? _TargetKind.turret
-            : _TargetKind.armor;
-    final baseSpeed = kind == _TargetKind.armor ? 0.12 : 0.16;
-    final waveBoost = min(0.08, (_wave - 1) * 0.01);
-    _targets.add(
-      _Target(
-        id: DateTime.now().microsecondsSinceEpoch + _targets.length,
-        lane: lane,
-        depth: depth,
-        speed: baseSpeed + waveBoost + _rng.nextDouble() * 0.03,
-        sway: _rng.nextDouble() * pi * 2,
-        drift: 0.8 + _rng.nextDouble() * 1.2,
-        damage: kind == _TargetKind.armor ? 20 : 14,
-        value: kind == _TargetKind.armor ? 35 : kind == _TargetKind.turret ? 24 : 18,
+  void _spawnZombie() {
+    if (_arenaSize == Size.zero) {
+      return;
+    }
+
+    final player = _currentAimPosition;
+    final edge = _weightedSpawnEdge(player);
+    const margin = 26.0;
+    final spawnPoint = switch (edge) {
+      0 => Offset(_rng.nextDouble() * _arenaSize.width, -margin),
+      1 => Offset(_arenaSize.width + margin, _rng.nextDouble() * _arenaSize.height),
+      2 => Offset(_rng.nextDouble() * _arenaSize.width, _arenaSize.height + margin),
+      _ => Offset(-margin, _rng.nextDouble() * _arenaSize.height),
+    };
+    final adjustedSpawnPoint = _pushSpawnAwayFromPlayer(spawnPoint, player);
+
+    final roll = _rng.nextDouble();
+    final kind = roll < 0.55
+        ? _ZombieKind.normal
+        : roll < 0.77
+            ? _ZombieKind.fast
+            : _ZombieKind.heavy;
+
+    final config = _zombieConfig(kind, _wave);
+    _zombies.add(
+      _Zombie(
+        id: DateTime.now().microsecondsSinceEpoch + _zombies.length,
+        position: adjustedSpawnPoint,
         kind: kind,
+        speed: config.speed + _rng.nextDouble() * config.speedVariance,
+        health: config.health,
+        maxHealth: config.health,
+        damagePerSecond: config.damagePerSecond,
+        radius: config.radius,
+        scoreValue: config.scoreValue,
+        coinValue: config.coinValue,
+        xpValue: config.xpValue,
+        wobbleSpeed: config.wobbleSpeed + _rng.nextDouble() * 0.8,
+        tintSeed: _rng.nextDouble(),
+      ),
+    );
+  }
+
+  void _spawnBossZombie() {
+    if (_arenaSize == Size.zero) {
+      return;
+    }
+
+    final player = _currentAimPosition;
+    final spawnPoint = Offset(
+      _arenaSize.width / 2 + (_rng.nextBool() ? -1 : 1) * (_arenaSize.width * 0.42),
+      _rng.nextBool() ? -34 : _arenaSize.height + 34,
+    );
+    final adjustedSpawnPoint = _pushSpawnAwayFromPlayer(spawnPoint, player, minDistance: 280);
+    final config = _zombieConfig(_ZombieKind.boss, _wave);
+    _zombies.add(
+      _Zombie(
+        id: DateTime.now().microsecondsSinceEpoch + _zombies.length,
+        position: adjustedSpawnPoint,
+        kind: _ZombieKind.boss,
+        speed: config.speed + _wave * 0.8,
+        health: config.health + ((_wave - 1) * 14),
+        maxHealth: config.health + ((_wave - 1) * 14),
+        damagePerSecond: config.damagePerSecond + ((_wave - 1) * 0.3),
+        radius: config.radius,
+        scoreValue: config.scoreValue + ((_wave - 1) * 20),
+        coinValue: config.coinValue + ((_wave - 1) * 4),
+        xpValue: config.xpValue + ((_wave - 1) * 5),
+        wobbleSpeed: config.wobbleSpeed,
+        tintSeed: _rng.nextDouble(),
       ),
     );
   }
@@ -194,12 +343,54 @@ class _ShooterScreenState extends State<ShooterScreen>
     _bannerClock = 1.4;
   }
 
+  double _balancedSpawnInterval() {
+    final wavePressure = max(0, _wave - 1) * 0.06;
+    final densityPressure = max(0, _zombies.length - 70) * 0.0045;
+    return max(0.26, 1.08 - wavePressure + densityPressure);
+  }
+
+  int _weightedSpawnEdge(Offset player) {
+    final left = player.dx;
+    final right = _arenaSize.width - player.dx;
+    final top = player.dy;
+    final bottom = _arenaSize.height - player.dy;
+    final weights = [bottom, left, top, right]
+        .map((value) => max(40.0, value + 40.0))
+        .toList();
+    final total = weights.fold<double>(0, (sum, value) => sum + value);
+    final pick = _rng.nextDouble() * total;
+    var cursor = 0.0;
+    for (var i = 0; i < weights.length; i++) {
+      cursor += weights[i];
+      if (pick <= cursor) {
+        return i;
+      }
+    }
+    return _rng.nextInt(4);
+  }
+
+  Offset _pushSpawnAwayFromPlayer(Offset spawnPoint, Offset player, {double minDistance = 220}) {
+    var point = spawnPoint;
+    var attempts = 0;
+    while ((point - player).distance < minDistance && attempts < 4) {
+      final delta = point - player;
+      final length = delta.distance;
+      if (length <= 0) {
+        break;
+      }
+      final scale = minDistance / length;
+      point = player + delta * scale;
+      attempts += 1;
+    }
+    return point;
+  }
+
   void _beginReload() {
     if (_reloading || _reserveAmmo <= 0) {
       return;
     }
     _reloading = true;
-    _reloadClock = 0.9;
+    _reloadClock = _reloadDuration;
     _flashBanner('Reloading');
     unawaited(GameAudioService.instance.playReloadCue());
   }
@@ -216,11 +407,22 @@ class _ShooterScreenState extends State<ShooterScreen>
   void _restartMission() {
     setState(() {
       _health = 100;
-      _score = 0;
+      _maxHealth = 100;
+      _bulletDamage = 40;
+      _reloadDuration = 0.9;
+      _aimMoveMultiplier = 1.0;
+      _pickupRadius = 120;
+      _bulletPenetration = 0;
+      _zombiesDefeated = 0;
+      _coins = 0;
+      _xp = 0;
+      _level = 1;
+      _xpToNextLevel = 50;
       _combo = 0;
       _ammo = 12;
       _reserveAmmo = 72;
       _wave = 1;
+      _highestWave = 1;
       _spawnClock = 0;
       _reloadClock = 0;
       _bannerClock = 0;
@@ -228,15 +430,22 @@ class _ShooterScreenState extends State<ShooterScreen>
       _paused = false;
       _gameOver = false;
       _banner = null;
-      _targets.clear();
+      _zombies.clear();
       _impacts.clear();
+      _corpses.clear();
+      _pickups.clear();
+    _zombieGrid.clear();
       _aimPosition = Offset.zero;
       _lastElapsed = Duration.zero;
+      _survivalClock = 0;
+      _bossSpawned = false;
+      _levelUpActive = false;
+      _pendingUpgrades = const [];
     });
   }
 
   void _togglePause() {
-    if (_gameOver) {
+    if (_gameOver || _levelUpActive) {
       return;
     }
     setState(() {
@@ -251,7 +460,7 @@ class _ShooterScreenState extends State<ShooterScreen>
       _restartMission();
       return;
     }
-    if (_paused) {
+    if (_paused || _levelUpActive) {
       return;
     }
     if (_reloading) {
@@ -266,24 +475,25 @@ class _ShooterScreenState extends State<ShooterScreen>
     _ammo -= 1;
     unawaited(GameAudioService.instance.playCue(GameAudioCue.fire));
 
-    _RenderedTarget? bestHit;
-    for (final target in _targets) {
-      final rendered = _projectTarget(target, _arenaSize);
-      if (!rendered.rect.contains(position)) {
-        continue;
-      }
-      if (bestHit == null || rendered.depth < bestHit.depth) {
-        bestHit = rendered;
+    final hits = <_Zombie>[];
+    for (final zombie in _zombieGrid.queryPoint(position, 220)) {
+      final rendered = _projectZombie(zombie, _arenaSize);
+      if (rendered.rect.contains(position)) {
+        hits.add(zombie);
       }
     }
 
-    if (bestHit != null) {
-      _targets.removeWhere((target) => target.id == bestHit!.target.id);
-      final points = bestHit.target.value + (_combo * 2);
-      _score += points;
-      _combo += 1;
-      _impacts.add(_Impact(position: position, life: 0.22));
-      _flashBanner('+$points');
+    if (hits.isNotEmpty) {
+      hits.sort((a, b) => (a.position - position).distance.compareTo((b.position - position).distance));
+      final processed = hits.take(1 + _bulletPenetration).toList(growable: false);
+      for (final zombie in processed) {
+        zombie.health -= _bulletDamage;
+        _impacts.add(_Impact(position: zombie.position, life: 0.24, blood: true));
+        if (zombie.health <= 0) {
+          _registerZombieKill(zombie, zombie.position);
+        }
+      }
+      _flashBanner(processed.length > 1 ? 'Pierce!' : 'Hit');
       unawaited(GameAudioService.instance.playHitCue());
     } else {
       _combo = 0;
@@ -295,6 +505,172 @@ class _ShooterScreenState extends State<ShooterScreen>
     if (_ammo == 0) {
       _beginReload();
     }
+
+    _rebuildZombieGrid();
+  }
+
+  void _registerZombieKill(_Zombie zombie, Offset position) {
+    _zombies.removeWhere((candidate) => candidate.id == zombie.id);
+    _zombiesDefeated += 1;
+    _coins += zombie.coinValue;
+    _xp += zombie.xpValue;
+    _combo += 1;
+    _spawnZombieDeathEffects(zombie, position);
+    _flashBanner('+${zombie.coinValue} coins');
+    unawaited(GameAudioService.instance.playHitCue());
+
+    if (_rng.nextDouble() < 0.22) {
+      _spawnHealthPickup(position);
+    }
+
+    _checkLevelUp();
+  }
+
+  void _spawnZombieDeathEffects(_Zombie zombie, Offset position) {
+    _corpses.add(_Corpse(
+      id: DateTime.now().microsecondsSinceEpoch + _corpses.length,
+      position: position,
+      kind: zombie.kind,
+      radius: zombie.radius,
+      life: zombie.kind == _ZombieKind.boss ? 1.3 : 0.9,
+      wobbleSpeed: 2.0 + _rng.nextDouble() * 1.5,
+    ));
+
+    final burstCount = zombie.kind == _ZombieKind.boss ? 10 : zombie.kind == _ZombieKind.heavy ? 7 : 5;
+    _spawnBloodBurst(position, burstCount, zombie.kind == _ZombieKind.boss ? 1.35 : 1.0);
+  }
+
+  void _spawnBloodBurst(Offset origin, int count, double intensity) {
+    for (var i = 0; i < count; i++) {
+      final angle = _rng.nextDouble() * pi * 2;
+      final speed = (50 + _rng.nextDouble() * 130) * intensity;
+      _impacts.add(
+        _Impact(
+          position: origin,
+          life: 0.24 + _rng.nextDouble() * 0.22,
+          blood: true,
+          intensity: 0.85 + _rng.nextDouble() * 0.85,
+          velocity: Offset(cos(angle), sin(angle)) * speed,
+          rotation: _rng.nextDouble() * pi,
+          rotationSpeed: (_rng.nextDouble() - 0.5) * 10,
+        ),
+      );
+    }
+  }
+
+  void _rebuildZombieGrid() {
+    _zombieGrid.rebuild(_zombies);
+  }
+
+  void _spawnHealthPickup(Offset position) {
+    final offset = Offset(
+      (_rng.nextDouble() - 0.5) * 28,
+      (_rng.nextDouble() - 0.5) * 28,
+    );
+    _pickups.add(
+      _Pickup(
+        id: DateTime.now().microsecondsSinceEpoch + _pickups.length,
+        position: position + offset,
+        life: 12,
+        healAmount: 16 + _rng.nextInt(12),
+        radius: 14,
+      ),
+    );
+  }
+
+  void _checkLevelUp() {
+    if (_levelUpActive || _gameOver || _xp < _xpToNextLevel) {
+      return;
+    }
+
+    final choices = _generateUpgradeChoices();
+    if (choices.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _levelUpActive = true;
+      _paused = true;
+      _pendingUpgrades = choices;
+    });
+    _flashBanner('Level up!');
+  }
+
+  List<_UpgradeChoice> _generateUpgradeChoices() {
+    final pool = <_UpgradeChoice>[
+      const _UpgradeChoice(
+        type: _UpgradeType.bulletDamage,
+        title: 'Bullet Damage',
+        description: 'Increase bullet damage by 12.',
+      ),
+      const _UpgradeChoice(
+        type: _UpgradeType.fireRate,
+        title: 'Faster Fire Rate',
+        description: 'Reduce reload delay and improve fire rhythm.',
+      ),
+      const _UpgradeChoice(
+        type: _UpgradeType.movementSpeed,
+        title: 'Movement Speed',
+        description: 'Increase aim movement speed by 12%.',
+      ),
+      const _UpgradeChoice(
+        type: _UpgradeType.health,
+        title: 'Increased Health',
+        description: 'Restore and increase max health by 20.',
+      ),
+      const _UpgradeChoice(
+        type: _UpgradeType.penetration,
+        title: 'Bullet Penetration',
+        description: 'Bullets pass through one extra zombie.',
+      ),
+      const _UpgradeChoice(
+        type: _UpgradeType.pickupRadius,
+        title: 'Pickup Radius',
+        description: 'Widen pickup radius for drops and rewards.',
+      ),
+    ]..shuffle(_rng);
+
+    return pool.take(3).toList(growable: false);
+  }
+
+  void _applyUpgrade(_UpgradeType type) {
+    if (!_levelUpActive) {
+      return;
+    }
+
+    setState(() {
+      switch (type) {
+        case _UpgradeType.bulletDamage:
+          _bulletDamage += 12;
+          break;
+        case _UpgradeType.fireRate:
+          _reloadDuration = max(0.45, _reloadDuration - 0.08);
+          break;
+        case _UpgradeType.movementSpeed:
+          _aimMoveMultiplier = min(2.0, _aimMoveMultiplier + 0.12);
+          break;
+        case _UpgradeType.health:
+          _maxHealth += 20;
+          _health = min(_maxHealth, _health + 20);
+          break;
+        case _UpgradeType.penetration:
+          _bulletPenetration += 1;
+          break;
+        case _UpgradeType.pickupRadius:
+          _pickupRadius += 18;
+          break;
+      }
+
+      _level += 1;
+      _xp -= _xpToNextLevel;
+      _xpToNextLevel = max(60, (_xpToNextLevel * 1.28).round());
+      _levelUpActive = false;
+      _pendingUpgrades = const [];
+      _paused = false;
+    });
+
+    unawaited(GameAudioService.instance.playCue(GameAudioCue.fire));
+    _checkLevelUp();
   }
 
   void _fireAtAim() {
@@ -315,11 +691,11 @@ class _ShooterScreenState extends State<ShooterScreen>
         );
         _arenaSize = safeSize;
 
-        final targets = _targets
-            .map((target) => _projectTarget(target, safeSize))
+        final zombies = _zombies
+            .map((zombie) => _projectZombie(zombie, safeSize))
             .toList(growable: false);
 
-        final arena = _buildArena(context, safeSize, targets);
+        final arena = _buildArena(context, safeSize, zombies);
         final sidePanel = _buildSidePanel(context, subtitleColor);
 
         return Container(
@@ -327,8 +703,8 @@ class _ShooterScreenState extends State<ShooterScreen>
             gradient: LinearGradient(
               colors: [
                 Color(0xFF05070B),
-                Color(0xFF09111A),
-                Color(0xFF101A29),
+                Color(0xFF09130D),
+                Color(0xFF101A13),
               ],
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
@@ -340,21 +716,21 @@ class _ShooterScreenState extends State<ShooterScreen>
               child: Column(
                 children: [
                   _buildMissionHeader(context),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   Expanded(
                     child: wide
                         ? Row(
                             children: [
-                              Expanded(flex: 7, child: arena),
+                              Expanded(flex: 8, child: arena),
                               const SizedBox(width: 16),
-                              Expanded(flex: 4, child: sidePanel),
+                              Expanded(flex: 3, child: sidePanel),
                             ],
                           )
                         : Column(
                             children: [
-                              Expanded(flex: 7, child: arena),
-                              const SizedBox(height: 16),
-                              Expanded(flex: 4, child: sidePanel),
+                              Expanded(flex: 8, child: arena),
+                              const SizedBox(height: 12),
+                              Expanded(flex: 3, child: sidePanel),
                             ],
                           ),
                   ),
@@ -371,10 +747,10 @@ class _ShooterScreenState extends State<ShooterScreen>
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF0B1220).withValues(alpha: 0.84),
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       child: Row(
         children: [
           Expanded(
@@ -382,12 +758,20 @@ class _ShooterScreenState extends State<ShooterScreen>
               children: [
                 Expanded(
                   child: _StatCard(
-                    label: 'Score',
-                    value: '$_score',
-                    icon: Icons.emoji_events_rounded,
+                    label: 'Kills',
+                    value: '$_zombiesDefeated',
+                    icon: Icons.warning_amber_rounded,
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _StatCard(
+                    label: 'Coins',
+                    value: '$_coins',
+                    icon: Icons.monetization_on_outlined,
+                  ),
+                ),
+                const SizedBox(width: 8),
                 Expanded(
                   child: _StatCard(
                     label: 'Combo',
@@ -395,15 +779,15 @@ class _ShooterScreenState extends State<ShooterScreen>
                     icon: Icons.bolt_rounded,
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 8),
                 Expanded(
                   child: _StatCard(
                     label: 'Status',
                     value: _gameOver
-                        ? 'Down'
+                        ? 'Overrun'
                         : _paused
                             ? 'Paused'
-                            : 'Engaged',
+                            : 'Alive',
                     icon: _gameOver
                         ? Icons.warning_amber_rounded
                         : _paused
@@ -411,14 +795,26 @@ class _ShooterScreenState extends State<ShooterScreen>
                             : Icons.track_changes_rounded,
                   ),
                 ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _StatCard(
+                    label: 'Timer',
+                    value: _formatDuration(_survivalClock),
+                    icon: Icons.timer_outlined,
+                  ),
+                ),
               ],
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 8),
           _HudChip(
             label: 'Wave $_wave',
-            value: _gameOver ? 'Down' : (_paused ? 'Hold' : 'Live'),
-            accent: _gameOver ? const Color(0xFFFB7185) : const Color(0xFF6EE7F9),
+            value: _gameOver
+                ? 'Down'
+                : _levelUpActive
+                    ? 'Upgrade'
+                    : (_paused ? 'Hold' : 'Live'),
+            accent: _gameOver ? const Color(0xFFFB7185) : const Color(0xFF9AE6B4),
           ),
         ],
       ),
@@ -428,7 +824,7 @@ class _ShooterScreenState extends State<ShooterScreen>
   Widget _buildArena(
     BuildContext context,
     Size size,
-    List<_RenderedTarget> targets,
+    List<_RenderedZombie> zombies,
   ) {
     final theme = Theme.of(context);
     final aimPosition = _currentAimPosition;
@@ -465,32 +861,56 @@ class _ShooterScreenState extends State<ShooterScreen>
                 ),
               ),
             ),
-            ...targets.map(
+            ...zombies.map(
               (rendered) => Positioned(
                 left: rendered.rect.left,
                 top: rendered.rect.top,
                 width: rendered.rect.width,
                 height: rendered.rect.height,
-                child: _TargetSprite(
-                  target: rendered.target,
+                child: _ZombieSprite(
+                  zombie: rendered.zombie,
                   progress: rendered.progress,
                 ),
               ),
             ),
+            ..._corpses.map(
+              (corpse) => Positioned(
+                left: corpse.position.dx - corpse.radius * 1.1,
+                top: corpse.position.dy - corpse.radius * 0.7,
+                width: corpse.radius * 2.2,
+                height: corpse.radius * 1.5,
+                child: _CorpseSprite(corpse: corpse),
+              ),
+            ),
+            ..._pickups.map(
+              (pickup) => Positioned(
+                left: pickup.position.dx - pickup.radius,
+                top: pickup.position.dy - pickup.radius,
+                width: pickup.radius * 2,
+                height: pickup.radius * 2,
+                child: _PickupSprite(pickup: pickup),
+              ),
+            ),
             ..._impacts.map(
               (impact) => Positioned(
-                left: impact.position.dx - 18,
-                top: impact.position.dy - 18,
+                left: impact.position.dx - impact.size / 2,
+                top: impact.position.dy - impact.size / 2,
                 child: Opacity(
                   opacity: impact.life.clamp(0.0, 1.0),
-                  child: Transform.scale(
-                    scale: impact.miss ? 1.35 : 1.0,
-                    child: Icon(
-                      impact.miss ? Icons.close_rounded : Icons.brightness_1_rounded,
-                      color: impact.miss
-                          ? const Color(0xFFFB7185)
-                          : const Color(0xFFFFD166),
-                      size: impact.miss ? 28 : 22,
+                  child: Transform.rotate(
+                    angle: impact.rotation,
+                    child: Transform.translate(
+                      offset: impact.velocity * impact.life * 0.008,
+                      child: Transform.scale(
+                        scale: impact.blood ? impact.intensity : 1.0,
+                        child: Icon(
+                          impact.miss ? Icons.close_rounded : Icons.brightness_1_rounded,
+                          color: impact.miss
+                              ? const Color(0xFFFB7185)
+                              : const Color(0xFFB91C1C),
+                          size: impact.miss ? 28 : impact.size,
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -507,7 +927,7 @@ class _ShooterScreenState extends State<ShooterScreen>
               left: aimPosition.dx - 46,
               top: aimPosition.dy - 46,
               child: const _Crosshair(
-                color: Color(0xFF6EE7F9),
+                color: Color(0xFF9AE6B4),
               ),
             ),
             if (_gameOver)
@@ -527,31 +947,100 @@ class _ShooterScreenState extends State<ShooterScreen>
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           const Icon(
-                            Icons.local_fire_department_rounded,
-                            color: Color(0xFFFF6B4A),
+                            Icons.warning_amber_rounded,
+                            color: Color(0xFFFB7185),
                             size: 48,
                           ),
                           const SizedBox(height: 12),
                           Text(
-                            'Mission failed',
+                            'Overrun',
                             style: theme.textTheme.headlineSmall?.copyWith(
                               fontWeight: FontWeight.w900,
                             ),
                           ),
                           const SizedBox(height: 6),
                           Text(
-                            'Reset the arena and take another run.',
+                            'The horde broke through. Restart to try another survival run.',
                             textAlign: TextAlign.center,
                             style: theme.textTheme.bodyMedium?.copyWith(
                               color: Colors.white70,
                             ),
                           ),
                           const SizedBox(height: 18),
+                          _GameOverStatGrid(
+                            survivalTime: _formatDuration(_survivalClock),
+                            zombiesDefeated: _zombiesDefeated,
+                            highestWave: _highestWave,
+                            coinsEarned: _coins,
+                          ),
+                          const SizedBox(height: 18),
                           FilledButton.icon(
                             onPressed: _restartMission,
                             icon: const Icon(Icons.restart_alt_rounded),
-                            label: const Text('Restart mission'),
+                            label: const Text('Restart run'),
                           ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            if (_levelUpActive)
+              Positioned.fill(
+                child: Container(
+                  color: Colors.black.withValues(alpha: 0.68),
+                  child: Center(
+                    child: Container(
+                      width: 420,
+                      margin: const EdgeInsets.all(20),
+                      padding: const EdgeInsets.all(22),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0B1220),
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Colors.black54,
+                            blurRadius: 28,
+                            offset: Offset(0, 14),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.auto_awesome_rounded,
+                                color: Color(0xFF9AE6B4),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'Level $_level reached',
+                                  style: theme.textTheme.headlineSmall?.copyWith(
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Choose one upgrade. The horde pauses while you improve your survival kit.',
+                            style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white70),
+                          ),
+                          const SizedBox(height: 16),
+                          for (final upgrade in _pendingUpgrades)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: _UpgradeTile(
+                                upgrade: upgrade,
+                                onSelected: () => _applyUpgrade(upgrade.type),
+                              ),
+                            ),
                         ],
                       ),
                     ),
@@ -603,14 +1092,14 @@ class _ShooterScreenState extends State<ShooterScreen>
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'Mission brief',
+              'Survival brief',
               style: theme.textTheme.titleLarge?.copyWith(
                 fontWeight: FontWeight.w900,
               ),
             ),
             const SizedBox(height: 8),
             Text(
-              'Track moving targets in a neon strike corridor and keep the line from collapsing.',
+              'Hold the center, drag to reposition the survivor, and thin out the horde before it reaches you.',
               style: theme.textTheme.bodyMedium?.copyWith(color: subtitleColor),
             ),
             const SizedBox(height: 16),
@@ -633,9 +1122,9 @@ class _ShooterScreenState extends State<ShooterScreen>
                   const SizedBox(height: 10),
                   _ProgressLine(
                     label: 'Health',
-                    value: _health / 100,
+                    value: _health / _maxHealth,
                     color: const Color(0xFF34D399),
-                    rightText: '${_health.toInt()}%',
+                    rightText: '${_health.toInt()} / ${_maxHealth.toInt()}',
                   ),
                   const SizedBox(height: 10),
                   _ProgressLine(
@@ -648,8 +1137,27 @@ class _ShooterScreenState extends State<ShooterScreen>
                   _ProgressLine(
                     label: 'Reserve',
                     value: _reserveAmmo / 72,
-                    color: const Color(0xFF6EE7F9),
+                    color: const Color(0xFF9AE6B4),
                     rightText: '$_reserveAmmo',
+                  ),
+                  const SizedBox(height: 10),
+                  _ProgressLine(
+                    label: 'XP',
+                    value: _xp / _xpToNextLevel,
+                    color: const Color(0xFFFBBF24),
+                    rightText: '$_xp / $_xpToNextLevel',
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Level $_level',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Pickup radius: ${_pickupRadius.toInt()} px',
+                    style: theme.textTheme.bodySmall?.copyWith(color: subtitleColor),
                   ),
                   const SizedBox(height: 16),
                   LayoutBuilder(
@@ -719,20 +1227,26 @@ class _ShooterScreenState extends State<ShooterScreen>
                   const SizedBox(height: 10),
                   const _NoteTile(
                     icon: Icons.adjust_rounded,
-                    title: 'Aim center mass',
-                    body: 'Targets that reach the front line drain health fast.',
+                    title: 'Keep moving',
+                    body: 'Zombies now spawn around the edges and home in on your position.',
+                  ),
+                  const SizedBox(height: 10),
+                  const _NoteTile(
+                    icon: Icons.touch_app_rounded,
+                    title: 'Drag to reposition',
+                    body: 'Use the same controls to move the survivor around the arena.',
                   ),
                   const SizedBox(height: 10),
                   const _NoteTile(
                     icon: Icons.flash_on_rounded,
-                    title: 'Keep combo alive',
-                    body: 'Consecutive hits ramp score and keep the arena hot.',
+                    title: 'Shoot on sight',
+                    body: 'Tapping a zombie will strike it directly and keep the horde in check.',
                   ),
                   const SizedBox(height: 10),
                   const _NoteTile(
-                    icon: Icons.replay_rounded,
-                    title: 'Reload smart',
-                    body: 'Use the pause button or reload window to reset your rhythm.',
+                    icon: Icons.workspace_premium_rounded,
+                    title: 'Level up',
+                    body: 'XP from kills fills your bar and pauses the game for upgrades.',
                   ),
                 ],
               ),
@@ -743,25 +1257,24 @@ class _ShooterScreenState extends State<ShooterScreen>
     );
   }
 
-  _RenderedTarget _projectTarget(_Target target, Size size) {
-    final depthFactor = (1.0 - target.depth).clamp(0.0, 1.0);
-    final perspective = Curves.easeOutCubic.transform(depthFactor);
-    final width = ui.lerpDouble(size.width * 0.10, size.width * 0.24, perspective)!;
-    final height = ui.lerpDouble(size.height * 0.10, size.height * 0.28, perspective)!;
-    final centerX = size.width / 2 +
-        (target.lane * size.width * 0.24 * (0.25 + perspective)) +
-        sin(target.sway) * size.width * 0.04;
-    final centerY = size.height * 0.18 + perspective * size.height * 0.62;
+  _RenderedZombie _projectZombie(_Zombie zombie, Size size) {
+    final healthPct = zombie.maxHealth <= 0 ? 0.0 : (zombie.health / zombie.maxHealth).clamp(0.0, 1.0);
+    final kindScale = switch (zombie.kind) {
+      _ZombieKind.normal => 1.0,
+      _ZombieKind.fast => 0.92,
+      _ZombieKind.heavy => 1.18,
+      _ZombieKind.boss => 1.7,
+    };
+    final baseSize = ui.lerpDouble(34, 52, healthPct)! * kindScale;
     final rect = Rect.fromCenter(
-      center: Offset(centerX, centerY),
-      width: width * (target.kind == _TargetKind.armor ? 1.15 : 1),
-      height: height * (target.kind == _TargetKind.armor ? 1.1 : 1),
+      center: zombie.position,
+      width: baseSize + zombie.radius,
+      height: baseSize + zombie.radius,
     );
-    return _RenderedTarget(
-      target: target,
+    return _RenderedZombie(
+      zombie: zombie,
       rect: rect,
-      depth: target.depth,
-      progress: depthFactor,
+      progress: healthPct,
     );
   }
 }
@@ -785,30 +1298,29 @@ class _ArenaBackdropPainter extends CustomPainter {
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
         colors: [
-          Color(0xFF0A1320),
-          Color(0xFF08101A),
-          Color(0xFF05070B),
+          Color(0xFF07110B),
+          Color(0xFF06110A),
+          Color(0xFF040705),
         ],
       ).createShader(rect);
     canvas.drawRect(rect, basePaint);
 
-    final horizonY = size.height * 0.22;
     final glowPaint = Paint()
       ..shader = RadialGradient(
         colors: [
-          const Color(0xFFFF6B4A).withValues(alpha: 0.22),
+          const Color(0xFF9AE6B4).withValues(alpha: 0.14),
           const Color(0xFF0B1220).withValues(alpha: 0.0),
         ],
       ).createShader(
         Rect.fromCircle(
-          center: Offset(size.width / 2, horizonY),
-          radius: size.shortestSide * 0.72,
+          center: Offset(size.width / 2, size.height / 2),
+          radius: size.shortestSide * 0.75,
         ),
       );
     canvas.drawRect(rect, glowPaint);
 
     final floorPaint = Paint()
-      ..color = const Color(0xFF6EE7F9).withValues(alpha: 0.08)
+      ..color = const Color(0xFF9AE6B4).withValues(alpha: 0.08)
       ..strokeWidth = 1.1;
 
     for (var i = -6; i <= 6; i++) {
@@ -816,18 +1328,18 @@ class _ArenaBackdropPainter extends CustomPainter {
       final topX = size.width / 2 + (i * size.width * 0.07);
       final bottomX = size.width / 2 + (i * size.width * 0.23);
       canvas.drawLine(
-        Offset(topX, horizonY),
+        Offset(topX, size.height * 0.18),
         Offset(bottomX, size.height),
         floorPaint,
       );
       if (i.abs() != 6) {
-        final pulse = 0.07 + sin(time * 1.7 + i) * 0.03;
+        final pulse = 0.05 + sin(time * 1.7 + i) * 0.02;
         final linePaint = Paint()
-          ..color = const Color(0xFFFFA24A).withValues(alpha: pulse)
-          ..strokeWidth = 1.2;
+          ..color = const Color(0xFFFB7185).withValues(alpha: pulse)
+          ..strokeWidth = 1.1;
         canvas.drawLine(
-          Offset(size.width * 0.12 * t, horizonY + 4),
-          Offset(size.width * (0.88 - t * 0.76), horizonY + 4),
+          Offset(size.width * 0.12 * t, size.height * 0.22),
+          Offset(size.width * (0.88 - t * 0.76), size.height * 0.22),
           linePaint,
         );
       }
@@ -835,11 +1347,11 @@ class _ArenaBackdropPainter extends CustomPainter {
 
     for (var row = 0; row < 8; row++) {
       final t = row / 7;
-      final y = ui.lerpDouble(horizonY + 10, size.height, t)!;
+      final y = ui.lerpDouble(size.height * 0.22, size.height, t)!;
       final width = ui.lerpDouble(size.width * 0.12, size.width, t)!;
       final alpha = (0.05 + (1 - t) * 0.03) + sin(time * 2 + row) * 0.01;
       final rowPaint = Paint()
-        ..color = const Color(0xFF6EE7F9).withValues(alpha: alpha.clamp(0.0, 0.09))
+        ..color = const Color(0xFF9AE6B4).withValues(alpha: alpha.clamp(0.0, 0.09))
         ..strokeWidth = 1;
       canvas.drawLine(
         Offset((size.width - width) / 2, y),
@@ -862,15 +1374,15 @@ class _ArenaBackdropPainter extends CustomPainter {
       );
     canvas.drawRect(rect, healthGlow);
 
-    final streakPaint = Paint()
-      ..color = const Color(0xFFFFFFFF).withValues(alpha: 0.05)
+    final bloodStreakPaint = Paint()
+      ..color = const Color(0xFFB91C1C).withValues(alpha: 0.05)
       ..strokeWidth = 2.3;
     for (var i = 0; i < 5; i++) {
       final offset = (time * 90 + i * 120) % (size.height + 120);
       canvas.drawLine(
         Offset(size.width * 0.12 + i * 18, offset - 80),
         Offset(size.width * 0.88 - i * 18, offset),
-        streakPaint,
+        bloodStreakPaint,
       );
     }
 
@@ -895,90 +1407,213 @@ class _ArenaBackdropPainter extends CustomPainter {
   }
 }
 
-class _TargetSprite extends StatelessWidget {
-  const _TargetSprite({
-    required this.target,
+class _ZombieSprite extends StatelessWidget {
+  const _ZombieSprite({
+    required this.zombie,
     required this.progress,
   });
 
-  final _Target target;
+  final _Zombie zombie;
   final double progress;
 
   @override
   Widget build(BuildContext context) {
-    final glowColor = switch (target.kind) {
-      _TargetKind.drone => const Color(0xFF6EE7F9),
-      _TargetKind.turret => const Color(0xFFFFA24A),
-      _TargetKind.armor => const Color(0xFFFB7185),
+    final bodyColor = switch (zombie.kind) {
+      _ZombieKind.normal => Color.lerp(
+          const Color(0xFF274735),
+          const Color(0xFF6B7F1A),
+          1 - progress,
+        )!,
+      _ZombieKind.fast => Color.lerp(
+          const Color(0xFF4C6B1F),
+          const Color(0xFFF59E0B),
+          1 - progress,
+        )!,
+      _ZombieKind.heavy => Color.lerp(
+          const Color(0xFF5B3B26),
+          const Color(0xFF8B1E1E),
+          1 - progress,
+        )!,
+      _ZombieKind.boss => Color.lerp(
+          const Color(0xFF5B1020),
+          const Color(0xFFB91C1C),
+          1 - progress,
+        )!,
+    };
+    final glowColor = switch (zombie.kind) {
+      _ZombieKind.normal => const Color(0xFF9AE6B4),
+      _ZombieKind.fast => const Color(0xFFFBBF24),
+      _ZombieKind.heavy => const Color(0xFFFB7185),
+      _ZombieKind.boss => const Color(0xFFEF4444),
     };
 
-    final scale = ui.lerpDouble(0.72, 1.08, progress)!;
-    final opacity = ui.lerpDouble(0.32, 1.0, progress)!.clamp(0.2, 1.0);
+    final bob = sin(zombie.wobble) * 0.04;
+    final angle = sin(zombie.wobble * 0.9) * 0.08;
+    final eyeIntensity = progress < 0.45 ? 1.0 : 0.55;
+    final isBoss = zombie.kind == _ZombieKind.boss;
+    final bossPulse = isBoss ? (0.5 + sin(zombie.wobble * 2.1) * 0.5) : 0.0;
+    final icon = switch (zombie.kind) {
+      _ZombieKind.normal => Icons.person_rounded,
+      _ZombieKind.fast => Icons.directions_run_rounded,
+      _ZombieKind.heavy => Icons.shield_rounded,
+      _ZombieKind.boss => Icons.person_search_rounded,
+    };
 
-    return Opacity(
-      opacity: opacity,
-      child: Transform.scale(
-        scale: scale,
+    return Transform.rotate(
+      angle: angle,
+      child: Transform.translate(
+        offset: Offset(0, bob * 12),
         child: Container(
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             gradient: RadialGradient(
               colors: [
-                Colors.white.withValues(alpha: 0.96),
-                glowColor.withValues(alpha: 0.96),
-                const Color(0xFF111827),
+                Colors.white.withValues(alpha: isBoss ? 0.98 : 0.92),
+                bodyColor.withValues(alpha: isBoss ? 1.0 : 0.96),
+                const Color(0xFF08110B),
               ],
-              stops: const [0.0, 0.38, 1.0],
+              stops: const [0.0, 0.48, 1.0],
             ),
             boxShadow: [
               BoxShadow(
-                color: glowColor.withValues(alpha: 0.35),
-                blurRadius: 18,
-                spreadRadius: 2,
+                color: glowColor.withValues(alpha: isBoss ? 0.45 : 0.28),
+                blurRadius: isBoss ? 28 : 18,
+                spreadRadius: isBoss ? 4 : 2,
               ),
             ],
           ),
           child: Stack(
             alignment: Alignment.center,
             children: [
-              Container(
-                margin: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.5), width: 2),
-                ),
-              ),
-              Container(
-                width: target.kind == _TargetKind.armor ? 34 : 28,
-                height: target.kind == _TargetKind.armor ? 34 : 28,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: const Color(0xFF05070B).withValues(alpha: 0.72),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.8), width: 2),
-                ),
-                child: Icon(
-                  switch (target.kind) {
-                    _TargetKind.drone => Icons.brightness_1_rounded,
-                    _TargetKind.turret => Icons.adjust_rounded,
-                    _TargetKind.armor => Icons.shield_rounded,
-                  },
-                  color: Colors.white,
-                  size: target.kind == _TargetKind.armor ? 16 : 14,
-                ),
-              ),
-              if (target.kind != _TargetKind.drone)
-                Positioned(
-                  top: 10,
-                  child: Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.85),
-                      shape: BoxShape.circle,
+              if (isBoss)
+                Container(
+                  margin: const EdgeInsets.all(2),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: const Color(0xFFF59E0B).withValues(alpha: 0.18 + bossPulse * 0.18),
+                      width: 2,
                     ),
                   ),
                 ),
+              Container(
+                margin: EdgeInsets.all(isBoss ? 6 : 8),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: isBoss ? 0.42 : 0.28),
+                    width: 2,
+                  ),
+                ),
+              ),
+              Icon(
+                icon,
+                color: Colors.white.withValues(alpha: 0.92),
+                size: isBoss ? 38 : 28,
+              ),
+              Positioned(
+                top: isBoss ? 9 : 12,
+                left: isBoss ? 18 : 13,
+                child: Container(
+                  width: isBoss ? 8 : 5,
+                  height: isBoss ? 8 : 5,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEF4444).withValues(alpha: eyeIntensity),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+              if (isBoss)
+                Positioned(
+                  bottom: 6,
+                  child: Container(
+                    width: 20,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF59E0B).withValues(alpha: 0.55 + bossPulse * 0.25),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+              Positioned(
+                bottom: isBoss ? 12 : 11,
+                child: Container(
+                  width: isBoss ? 16 : 12,
+                  height: isBoss ? 5 : 4,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.52),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CorpseSprite extends StatelessWidget {
+  const _CorpseSprite({required this.corpse});
+
+  final _Corpse corpse;
+
+  @override
+  Widget build(BuildContext context) {
+    final lifePct = (corpse.life / corpse.maxLife).clamp(0.0, 1.0);
+    final flatten = ui.lerpDouble(1.0, 0.65, 1 - lifePct)!;
+    final fade = lifePct;
+    final color = switch (corpse.kind) {
+      _ZombieKind.normal => const Color(0xFF335C3F),
+      _ZombieKind.fast => const Color(0xFF556B2F),
+      _ZombieKind.heavy => const Color(0xFF5A2C24),
+      _ZombieKind.boss => const Color(0xFF7F1D1D),
+    };
+
+    return Opacity(
+      opacity: fade,
+      child: Transform.rotate(
+        angle: sin(corpse.wobble) * 0.18,
+        child: Transform.scale(
+          scale: flatten,
+          child: Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(
+                colors: [
+                  color.withValues(alpha: 0.9),
+                  const Color(0xFF120A0A).withValues(alpha: 0.95),
+                ],
+                stops: const [0.0, 1.0],
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFFB91C1C).withValues(alpha: 0.18 * fade),
+                  blurRadius: 14,
+                  spreadRadius: 1,
+                ),
+              ],
+            ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Container(
+                  margin: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.black.withValues(alpha: 0.35), width: 2),
+                  ),
+                ),
+                Icon(
+                  corpse.kind == _ZombieKind.boss
+                      ? Icons.warning_rounded
+                      : Icons.circle_rounded,
+                  color: Colors.black.withValues(alpha: 0.5),
+                  size: corpse.kind == _ZombieKind.boss ? 26 : 20,
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1090,7 +1725,7 @@ class _HudChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         color: const Color(0xFF07111C).withValues(alpha: 0.9),
         borderRadius: BorderRadius.circular(999),
@@ -1103,7 +1738,7 @@ class _HudChip extends StatelessWidget {
             label,
             style: TextStyle(
               color: accent.withValues(alpha: 0.9),
-              fontSize: 11,
+              fontSize: 10,
               fontWeight: FontWeight.w700,
               letterSpacing: 1.0,
             ),
@@ -1157,25 +1792,25 @@ class _StatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: const Color(0xFF07111C).withValues(alpha: 0.76),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: const Color(0xFF6EE7F9), size: 18),
-          const SizedBox(height: 10),
+          Icon(icon, color: const Color(0xFF9AE6B4), size: 16),
+          const SizedBox(height: 8),
           Text(
             label,
-            style: const TextStyle(fontSize: 12, color: Colors.white70),
+            style: const TextStyle(fontSize: 11, color: Colors.white70),
           ),
           const SizedBox(height: 4),
           Text(
             value,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
           ),
         ],
       ),
@@ -1199,7 +1834,7 @@ class _NoteTile extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, color: const Color(0xFFFFA24A), size: 18),
+        Icon(icon, color: const Color(0xFF9AE6B4), size: 18),
         const SizedBox(width: 10),
         Expanded(
           child: Column(
@@ -1222,41 +1857,345 @@ class _NoteTile extends StatelessWidget {
   }
 }
 
-class _Target {
-  _Target({
-    required this.id,
-    required this.lane,
-    required this.depth,
-    required this.speed,
-    required this.sway,
-    required this.drift,
-    required this.damage,
+class _PickupSprite extends StatelessWidget {
+  const _PickupSprite({required this.pickup});
+
+  final _Pickup pickup;
+
+  @override
+  Widget build(BuildContext context) {
+    final pulse = 0.9 + sin(pickup.life * 3.2) * 0.06;
+    return Center(
+      child: Transform.scale(
+        scale: pulse,
+        child: Container(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: RadialGradient(
+              colors: [
+                const Color(0xFFE8FFF4).withValues(alpha: 0.95),
+                const Color(0xFF34D399).withValues(alpha: 0.9),
+                const Color(0xFF064E3B),
+              ],
+              stops: const [0.0, 0.4, 1.0],
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF34D399).withValues(alpha: 0.36),
+                blurRadius: 16,
+                spreadRadius: 1,
+              ),
+            ],
+          ),
+          child: Center(
+            child: Icon(
+              Icons.favorite_rounded,
+              size: pickup.radius,
+              color: const Color(0xFF063B28),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _GameOverStatGrid extends StatelessWidget {
+  const _GameOverStatGrid({
+    required this.survivalTime,
+    required this.zombiesDefeated,
+    required this.highestWave,
+    required this.coinsEarned,
+  });
+
+  final String survivalTime;
+  final int zombiesDefeated;
+  final int highestWave;
+  final int coinsEarned;
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView.count(
+      crossAxisCount: 2,
+      shrinkWrap: true,
+      mainAxisSpacing: 10,
+      crossAxisSpacing: 10,
+      physics: const NeverScrollableScrollPhysics(),
+      childAspectRatio: 1.8,
+      children: [
+        _EndStatTile(label: 'Survival time', value: survivalTime),
+        _EndStatTile(label: 'Zombies defeated', value: '$zombiesDefeated'),
+        _EndStatTile(label: 'Highest wave', value: '$highestWave'),
+        _EndStatTile(label: 'Coins earned', value: '$coinsEarned'),
+      ],
+    );
+  }
+}
+
+class _EndStatTile extends StatelessWidget {
+  const _EndStatTile({
+    required this.label,
     required this.value,
-    required this.kind,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF07111C).withValues(alpha: 0.82),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(fontSize: 11, color: Colors.white70),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Pickup {
+  _Pickup({
+    required this.id,
+    required this.position,
+    required this.life,
+    required this.healAmount,
+    required this.radius,
   });
 
   final int id;
-  final double lane;
-  double depth;
-  final double speed;
-  double sway;
-  final double drift;
-  final int damage;
-  final int value;
-  final _TargetKind kind;
+  final Offset position;
+  double life;
+  final int healAmount;
+  final double radius;
 }
 
-class _RenderedTarget {
-  _RenderedTarget({
-    required this.target,
+class _Corpse {
+  _Corpse({
+    required this.id,
+    required this.position,
+    required this.kind,
+    required this.radius,
+    required this.life,
+    required this.wobbleSpeed,
+  });
+
+  final int id;
+  final Offset position;
+  final _ZombieKind kind;
+  final double radius;
+  final double maxLife = 1.3;
+  double life;
+  final double wobbleSpeed;
+  double wobble = 0;
+}
+
+class _Zombie {
+  _Zombie({
+    required this.id,
+    required this.position,
+    required this.kind,
+    required this.speed,
+    required this.health,
+    required this.maxHealth,
+    required this.damagePerSecond,
+    required this.radius,
+    required this.scoreValue,
+    required this.coinValue,
+    required this.xpValue,
+    required this.wobbleSpeed,
+    required this.tintSeed,
+  });
+
+  final int id;
+  Offset position;
+  final _ZombieKind kind;
+  final double speed;
+  double health;
+  final double maxHealth;
+  final double damagePerSecond;
+  final double radius;
+  final int scoreValue;
+  final int coinValue;
+  final int xpValue;
+  final double wobbleSpeed;
+  final double tintSeed;
+  double wobble = 0;
+  double specialClock = 0;
+  double chargeClock = 0;
+  bool isCharging = false;
+  Offset chargeDirection = Offset.zero;
+}
+
+class _ZombieConfig {
+  const _ZombieConfig({
+    required this.speed,
+    required this.speedVariance,
+    required this.health,
+    required this.damagePerSecond,
+    required this.radius,
+    required this.scoreValue,
+    required this.coinValue,
+    required this.xpValue,
+    required this.wobbleSpeed,
+  });
+
+  final double speed;
+  final double speedVariance;
+  final double health;
+  final double damagePerSecond;
+  final double radius;
+  final int scoreValue;
+  final int coinValue;
+  final int xpValue;
+  final double wobbleSpeed;
+}
+
+_ZombieConfig _zombieConfig(_ZombieKind kind, int wave) {
+  final waveBoost = max(0, wave - 1).toDouble();
+  return switch (kind) {
+    _ZombieKind.normal => _ZombieConfig(
+        speed: 36,
+        speedVariance: 10,
+        health: 28 + (waveBoost * 1.4),
+        damagePerSecond: 12 + (waveBoost * 0.6),
+        radius: 18,
+        scoreValue: 20,
+        coinValue: 5,
+        xpValue: 10,
+        wobbleSpeed: 2.0,
+      ),
+    _ZombieKind.fast => _ZombieConfig(
+        speed: 58,
+        speedVariance: 14,
+        health: 20 + (waveBoost * 0.95),
+        damagePerSecond: 10 + (waveBoost * 0.5),
+        radius: 16,
+        scoreValue: 24,
+        coinValue: 7,
+        xpValue: 12,
+        wobbleSpeed: 2.8,
+      ),
+    _ZombieKind.heavy => _ZombieConfig(
+        speed: 26,
+        speedVariance: 8,
+        health: 60 + (waveBoost * 3.2),
+        damagePerSecond: 16 + (waveBoost * 0.7),
+        radius: 22,
+        scoreValue: 40,
+        coinValue: 10,
+        xpValue: 18,
+        wobbleSpeed: 1.5,
+      ),
+    _ZombieKind.boss => _ZombieConfig(
+        speed: 22,
+        speedVariance: 0,
+        health: 260 + (waveBoost * 18),
+        damagePerSecond: 24 + (waveBoost * 0.9),
+        radius: 34,
+        scoreValue: 250,
+        coinValue: 80,
+        xpValue: 150,
+        wobbleSpeed: 1.1,
+      ),
+  };
+}
+
+String _formatDuration(double seconds) {
+  final total = seconds.floor();
+  final minutes = total ~/ 60;
+  final remainingSeconds = total % 60;
+  return '${minutes.toString().padLeft(2, '0')}:${remainingSeconds.toString().padLeft(2, '0')}';
+}
+
+class _UpgradeChoice {
+  const _UpgradeChoice({
+    required this.type,
+    required this.title,
+    required this.description,
+  });
+
+  final _UpgradeType type;
+  final String title;
+  final String description;
+}
+
+class _UpgradeTile extends StatelessWidget {
+  const _UpgradeTile({
+    required this.upgrade,
+    required this.onSelected,
+  });
+
+  final _UpgradeChoice upgrade;
+  final VoidCallback onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onSelected,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0xFF07111C).withValues(alpha: 0.76),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.add_circle_outline_rounded, color: Color(0xFF9AE6B4)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    upgrade.title,
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    upgrade.description,
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+enum _UpgradeType { bulletDamage, fireRate, movementSpeed, health, penetration, pickupRadius }
+
+enum _ZombieKind { normal, fast, heavy, boss }
+
+class _RenderedZombie {
+  _RenderedZombie({
+    required this.zombie,
     required this.rect,
-    required this.depth,
     required this.progress,
   });
 
-  final _Target target;
+  final _Zombie zombie;
   final Rect rect;
-  final double depth;
   final double progress;
 }
 
@@ -1265,11 +2204,62 @@ class _Impact {
     required this.position,
     required this.life,
     this.miss = false,
+    this.blood = false,
+    this.intensity = 1.0,
+    this.velocity = Offset.zero,
+    this.rotation = 0,
+    this.rotationSpeed = 0,
   });
 
-  final Offset position;
+  Offset position;
   double life;
   final bool miss;
+  final bool blood;
+  final double intensity;
+  final Offset velocity;
+  double rotation;
+  final double rotationSpeed;
+
+  double get size => blood ? 22 * intensity : 18;
 }
 
-enum _TargetKind { drone, turret, armor }
+class _ZombieSpatialGrid {
+  _ZombieSpatialGrid({required this.cellSize});
+
+  final double cellSize;
+  final Map<int, List<_Zombie>> _cells = <int, List<_Zombie>>{};
+
+  void clear() => _cells.clear();
+
+  void rebuild(List<_Zombie> zombies) {
+    _cells.clear();
+    for (final zombie in zombies) {
+      final key = _cellKeyFor(zombie.position);
+      final bucket = _cells.putIfAbsent(key, () => <_Zombie>[]);
+      bucket.add(zombie);
+    }
+  }
+
+  List<_Zombie> queryPoint(Offset point, double radius) {
+    final minX = ((point.dx - radius) / cellSize).floor();
+    final maxX = ((point.dx + radius) / cellSize).floor();
+    final minY = ((point.dy - radius) / cellSize).floor();
+    final maxY = ((point.dy + radius) / cellSize).floor();
+    final results = <_Zombie>[];
+    for (var x = minX; x <= maxX; x++) {
+      for (var y = minY; y <= maxY; y++) {
+        final bucket = _cells[_cellKey(x, y)];
+        if (bucket != null) {
+          results.addAll(bucket);
+        }
+      }
+    }
+    return results;
+  }
+
+  int _cellKeyFor(Offset position) {
+    return _cellKey((position.dx / cellSize).floor(), (position.dy / cellSize).floor());
+  }
+
+  int _cellKey(int x, int y) => (x << 16) ^ (y & 0xFFFF);
+}

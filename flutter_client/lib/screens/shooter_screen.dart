@@ -340,21 +340,21 @@ class _ShooterScreenState extends State<ShooterScreen>
               child: Column(
                 children: [
                   _buildMissionHeader(context),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   Expanded(
                     child: wide
                         ? Row(
                             children: [
-                              Expanded(flex: 7, child: arena),
+                              Expanded(flex: 8, child: arena),
                               const SizedBox(width: 16),
-                              Expanded(flex: 4, child: sidePanel),
+                              Expanded(flex: 3, child: sidePanel),
                             ],
                           )
                         : Column(
                             children: [
-                              Expanded(flex: 7, child: arena),
-                              const SizedBox(height: 16),
-                              Expanded(flex: 4, child: sidePanel),
+                              Expanded(flex: 8, child: arena),
+                              const SizedBox(height: 12),
+                              Expanded(flex: 3, child: sidePanel),
                             ],
                           ),
                   ),
@@ -371,7 +371,7 @@ class _ShooterScreenState extends State<ShooterScreen>
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF0B1220).withValues(alpha: 0.84),
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
@@ -387,7 +387,7 @@ class _ShooterScreenState extends State<ShooterScreen>
                     icon: Icons.emoji_events_rounded,
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 8),
                 Expanded(
                   child: _StatCard(
                     label: 'Combo',
@@ -395,7 +395,7 @@ class _ShooterScreenState extends State<ShooterScreen>
                     icon: Icons.bolt_rounded,
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 8),
                 Expanded(
                   child: _StatCard(
                     label: 'Status',
@@ -414,7 +414,7 @@ class _ShooterScreenState extends State<ShooterScreen>
               ],
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 8),
           _HudChip(
             label: 'Wave $_wave',
             value: _gameOver ? 'Down' : (_paused ? 'Hold' : 'Live'),
@@ -1090,7 +1090,7 @@ class _HudChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         color: const Color(0xFF07111C).withValues(alpha: 0.9),
         borderRadius: BorderRadius.circular(999),
@@ -1103,7 +1103,7 @@ class _HudChip extends StatelessWidget {
             label,
             style: TextStyle(
               color: accent.withValues(alpha: 0.9),
-              fontSize: 11,
+              fontSize: 10,
               fontWeight: FontWeight.w700,
               letterSpacing: 1.0,
             ),
@@ -1157,25 +1157,25 @@ class _StatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: const Color(0xFF07111C).withValues(alpha: 0.76),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: const Color(0xFF6EE7F9), size: 18),
-          const SizedBox(height: 10),
+          Icon(icon, color: const Color(0xFF6EE7F9), size: 16),
+          const SizedBox(height: 8),
           Text(
             label,
-            style: const TextStyle(fontSize: 12, color: Colors.white70),
+            style: const TextStyle(fontSize: 11, color: Colors.white70),
           ),
           const SizedBox(height: 4),
           Text(
             value,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
           ),
         ],
       ),

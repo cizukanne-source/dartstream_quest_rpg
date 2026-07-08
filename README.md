@@ -53,6 +53,7 @@ To build the production web bundle:
 ```sh
 flutter build web --release \
   --dart-define=FIREBASE_API_KEY=your_web_key_here \
+  --dart-define=GOOGLE_OAUTH_CLIENT_ID=your_google_oauth_client_id.apps.googleusercontent.com \
   --dart-define=INTELLITOGGLE_API_URL=https://dev-api.intellitoggle.com \
   --dart-define=INTELLITOGGLE_CLIENT_ID=client_... \
   --dart-define=INTELLITOGGLE_CLIENT_SECRET=secret_... \

@@ -142,7 +142,7 @@ class Session extends ChangeNotifier {
       }
     } on DartStreamFirebaseAuthException catch (error) {
       status = SessionStatus.error;
-      errorMessage = error.message;
+      errorMessage = _friendlyFirebaseAuthError(error.message);
     } on DartStreamApiException catch (error) {
       status = SessionStatus.error;
       errorMessage = _friendlyApiError(error);
@@ -169,7 +169,7 @@ class Session extends ChangeNotifier {
       await _applySignedInConnection(connection);
     } on DartStreamFirebaseAuthException catch (error) {
       status = SessionStatus.error;
-      errorMessage = error.message;
+      errorMessage = _friendlyFirebaseAuthError(error.message);
     } on DartStreamApiException catch (error) {
       status = SessionStatus.error;
       errorMessage = _friendlyApiError(error);
@@ -198,6 +198,16 @@ class Session extends ChangeNotifier {
           'Use the Firebase Web API key for the project configured in DartStream, or update the backend issuer allowlist.';
     }
     return raw;
+  }
+
+  String _friendlyFirebaseAuthError(String message) {
+    final lower = message.toLowerCase();
+    if (lower.contains('api key not valid') ||
+        lower.contains('api_key_invalid') ||
+        lower.contains('invalid api key')) {
+      return 'Firebase rejected the web API key. Rebuild the web app with a valid `--dart-define=FIREBASE_API_KEY=...` value on its own line, then redeploy.';
+    }
+    return message;
   }
 
   void signOut() {

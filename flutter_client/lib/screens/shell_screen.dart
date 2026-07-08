@@ -140,32 +140,33 @@ class _Sidebar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 220,
+      width: 180,
       color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.92),
-      padding: const EdgeInsets.symmetric(vertical: 16),
+      padding: const EdgeInsets.symmetric(vertical: 12),
       child: NavigationRail(
         selectedIndex: index,
         onDestinationSelected: onChanged,
         labelType: NavigationRailLabelType.all,
         leading: Padding(
-          padding: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.only(bottom: 8),
           child: Column(
             children: [
               Container(
-                width: 52,
-                height: 52,
+                width: 42,
+                height: 42,
                 decoration: BoxDecoration(
                   gradient: const LinearGradient(
                     colors: [Color(0xFFFF6B4A), Color(0xFFFFA24A)],
                   ),
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(14),
                 ),
                 child: const Icon(Icons.gps_fixed_rounded, color: Colors.white),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               Text(
                 'Arena',
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontSize: 17,
                       fontWeight: FontWeight.w900,
                     ),
               ),
