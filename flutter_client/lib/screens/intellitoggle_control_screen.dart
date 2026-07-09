@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:openfeature_provider_intellitoggle/openfeature_provider_intellitoggle.dart';
 
 import '../intellitoggle/intellitoggle.dart';
 import '../state/session.dart';
@@ -13,14 +16,25 @@ class IntelliToggleControlScreen extends StatefulWidget {
 }
 
 class _IntelliToggleControlScreenState extends State<IntelliToggleControlScreen> {
-  bool _enabled = true;
   bool _busy = false;
   String? _error;
+  StreamSubscription<IntelliToggleEvent>? _eventsSub;
+
+  bool get _enabled => IntelliToggle.instance.provider.state == ProviderState.READY;
 
   @override
   void initState() {
     super.initState();
+    _eventsSub = IntelliToggle.instance.events.listen((_) {
+      if (mounted) setState(() {});
+    });
     _register();
+  }
+
+  @override
+  void dispose() {
+    _eventsSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _register() async {
@@ -29,16 +43,14 @@ class _IntelliToggleControlScreenState extends State<IntelliToggleControlScreen>
       _error = null;
     });
     try {
-      if (_enabled) {
-        await IntelliToggle.instance.register(
-          targeting: {
-            'targetingKey': widget.session.userId ?? widget.session.email ?? 'anonymous',
-            'email': widget.session.email ?? '',
-            'tenantId': widget.session.tenantId ?? '',
-            'displayName': widget.session.displayName ?? '',
-          },
-        );
-      }
+      await IntelliToggle.instance.register(
+        targeting: {
+          'targetingKey': widget.session.userId ?? widget.session.email ?? 'anonymous',
+          'email': widget.session.email ?? '',
+          'tenantId': widget.session.tenantId ?? '',
+          'displayName': widget.session.displayName ?? '',
+        },
+      );
     } catch (error) {
       if (mounted) {
         setState(() => _error = '$error');
@@ -50,7 +62,6 @@ class _IntelliToggleControlScreenState extends State<IntelliToggleControlScreen>
 
   Future<void> _toggle(bool value) async {
     setState(() {
-      _enabled = value;
       _busy = true;
       _error = null;
     });
@@ -65,6 +76,7 @@ class _IntelliToggleControlScreenState extends State<IntelliToggleControlScreen>
           },
         );
       } else {
+        await IntelliToggle.instance.shutdown();
         IntelliToggle.instance.clearLogs();
       }
     } catch (error) {

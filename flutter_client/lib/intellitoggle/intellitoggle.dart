@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:openfeature_provider_intellitoggle/openfeature_provider_intellitoggle.dart';
 
@@ -24,20 +26,27 @@ class IntelliToggle {
 
   bool _registered = false;
   FeatureClient? _client;
+  IntelliToggleProvider? _provider;
   IntelliToggleOptions? _options;
   Map<String, dynamic> _targeting = const {};
+  StreamSubscription<IntelliToggleEvent>? _providerEventsSub;
 
   /// Live, capped feed of OpenFeature hook lifecycle lines.
   final ValueNotifier<List<String>> logs = ValueNotifier<List<String>>(const []);
+  final StreamController<IntelliToggleEvent> _eventsController =
+      StreamController<IntelliToggleEvent>.broadcast();
 
   /// Whether the OAuth client-credentials were injected at build time.
   bool get isConfigured => AppConfig.hasIntelliToggle;
 
   /// Whether the provider has been registered with OpenFeature.
-  bool get isReady => _registered;
+  bool get isReady => _provider?.state == ProviderState.READY;
 
   /// The active OpenFeature provider - only valid once [register] has run.
-  FeatureProvider get provider => OpenFeatureAPI().provider;
+  FeatureProvider get provider => _provider ?? OpenFeatureAPI().provider;
+
+  /// Provider lifecycle events forwarded from the active provider instance.
+  Stream<IntelliToggleEvent> get events => _eventsController.stream;
 
   // ---- provider configuration (surfaced in the UI) ------------------------
   IntelliToggleOptions? get options => _options;
@@ -64,8 +73,11 @@ class IntelliToggle {
       );
     }
     if (!_registered) {
-      _options = IntelliToggleOptions.production(
+      _options = IntelliToggleOptions(
         baseUri: Uri.parse(AppConfig.intelliToggleApiUrl),
+        enablePolling: true,
+        enableStreaming: true,
+        cacheTtl: Duration.zero,
       );
       final provider = IntelliToggleProvider(
         clientId: AppConfig.intelliToggleClientId,
@@ -74,15 +86,30 @@ class IntelliToggle {
         options: _options!,
       );
       await OpenFeatureAPI().setProvider(provider);
+      _provider = provider;
       _registered = true;
+      await _bindProviderEvents(provider);
     }
     applyTargeting(targeting ?? _targeting);
   }
 
   /// Re-initialize the provider after a transient init failure.
   Future<void> reconnect({Map<String, dynamic>? targeting}) async {
-    _registered = false;
+    await shutdown();
     await register(targeting: targeting ?? _targeting);
+  }
+
+  /// Stop the active provider and clear the current client hook state.
+  Future<void> shutdown() async {
+    await _providerEventsSub?.cancel();
+    _providerEventsSub = null;
+    final provider = _provider;
+    _provider = null;
+    _client = null;
+    _registered = false;
+    if (provider != null) {
+      await provider.shutdown();
+    }
   }
 
   /// Replace the global targeting context and rebuild the hooked client.
@@ -106,6 +133,14 @@ class IntelliToggle {
     ));
     client.addHook(IntelliToggleTelemetryHook());
     _client = client;
+  }
+
+  Future<void> _bindProviderEvents(IntelliToggleProvider provider) async {
+    await _providerEventsSub?.cancel();
+    _providerEventsSub = provider.events.listen(
+      (event) => _eventsController.add(event),
+      onError: _eventsController.addError,
+    );
   }
 
   void _appendLog(String message) {
@@ -162,4 +197,10 @@ class IntelliToggle {
     Map<String, dynamic>? context,
   }) =>
       provider.getStringFlag(flagKey, defaultValue, context: context);
+
+  Future<void> dispose() async {
+    await shutdown();
+    await _eventsController.close();
+    logs.dispose();
+  }
 }

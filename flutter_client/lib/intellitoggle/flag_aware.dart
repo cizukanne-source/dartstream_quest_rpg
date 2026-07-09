@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:openfeature_provider_intellitoggle/openfeature_provider_intellitoggle.dart';
 
 import 'intellitoggle.dart';
 
@@ -22,10 +25,13 @@ class ItFlagAware extends StatefulWidget {
 
 class _ItFlagAwareState extends State<ItFlagAware> {
   bool? _value;
+  StreamSubscription<IntelliToggleEvent>? _eventsSub;
+  Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
+    _subscribeToLiveUpdates();
     _evaluate();
   }
 
@@ -33,6 +39,26 @@ class _ItFlagAwareState extends State<ItFlagAware> {
   void didUpdateWidget(ItFlagAware oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.flagKey != widget.flagKey) _evaluate();
+  }
+
+  @override
+  void dispose() {
+    _eventsSub?.cancel();
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  void _subscribeToLiveUpdates() {
+    _eventsSub = IntelliToggle.instance.events.listen((event) {
+      if (!mounted) return;
+      if (event.type == IntelliToggleEventType.configurationChanged ||
+          event.type == IntelliToggleEventType.ready) {
+        _evaluate();
+      }
+    });
+    _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (mounted) _evaluate();
+    });
   }
 
   Future<void> _evaluate() async {
@@ -78,11 +104,34 @@ class ItExperiment extends StatefulWidget {
 
 class _ItExperimentState extends State<ItExperiment> {
   String? _variant;
+  StreamSubscription<IntelliToggleEvent>? _eventsSub;
+  Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
+    _subscribeToLiveUpdates();
     _evaluate();
+  }
+
+  @override
+  void dispose() {
+    _eventsSub?.cancel();
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  void _subscribeToLiveUpdates() {
+    _eventsSub = IntelliToggle.instance.events.listen((event) {
+      if (!mounted) return;
+      if (event.type == IntelliToggleEventType.configurationChanged ||
+          event.type == IntelliToggleEventType.ready) {
+        _evaluate();
+      }
+    });
+    _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (mounted) _evaluate();
+    });
   }
 
   Future<void> _evaluate() async {
