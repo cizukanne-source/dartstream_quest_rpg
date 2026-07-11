@@ -1,0 +1,18 @@
+# DartStream project manifest, consumed by the `dartstream` CLI
+# (https://pub.dev/packages/ds_dartstream). `dartstream validate --strict`
+# checks it in CI; the schema follows `dartstream init` / `dartstream configure`.
+name: dartstream_quest_rpg
+type: existing-dartstream
+version_channel: stable
+cloud:
+  vendor: gcp
+auth:
+  provider: firebase
+database:
+  provider: postgres
+cicd:
+  provider: github
+features:
+  - gaming
+  - analytics
+extensions: []

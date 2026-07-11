@@ -212,19 +212,6 @@ repo also keeps Firebase limited to client auth and backend wiring only.
 │   ├── platform_deepdive.dart
 │   ├── reactive_deepdive.dart
 │   └── smoke.dart
-├── flutter_client/
-│   ├── lib/
-│   │   ├── auth/
-│   │   ├── game/
-│   │   ├── intellitoggle/
-│   │   ├── screens/
-│   │   ├── state/
-│   │   ├── theme/
-│   │   └── widgets/
-│   ├── web/
-│   ├── analysis_options.yaml
-│   ├── pubspec.yaml
-│   └── README.md
 ├── lib/
 │   ├── config.dart
 │   ├── main.dart
@@ -232,12 +219,29 @@ repo also keeps Firebase limited to client auth and backend wiring only.
 └── README.md
 ```
 
-The nested `flutter_client/` subtree mirrors the sample app layout from
-`dartstream-sample-app`, while the existing root `lib/` package remains the
-active Quest RPG app for now.
+The root `lib/` package is the canonical app tree. CI, tests, and hosting all
+target the same build now.
 
 ## Why this repo exists
 
 This repo is intentionally separate from `dartstream-saas`. It behaves like an
 external customer project that consumes DartStream as a backend service rather
 than a repository with direct access to the platform code.
+
+## Using the DartStream CLI
+
+The repo carries a DartStream project manifest at [`dartstream.yaml`](dartstream.yaml).
+CI installs the CLI and validates the manifest with `dartstream validate --strict`,
+so changes to the project shape are checked the same way a customer project would be.
+
+Run it locally with:
+
+```sh
+dart pub global activate ds_dartstream 0.0.8
+dartstream login --token <token> --api-url https://dev-api.dartstream.io
+dartstream validate --strict
+```
+
+The manifest declares this project as an existing DartStream app on GCP with
+Firebase auth, Postgres-backed data, GitHub CI, and the gaming/analytics
+feature set.
